@@ -49,6 +49,61 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+// Standard Public Holidays list (YYYY-MM-DD format)
+const PUBLIC_HOLIDAYS = [
+  // 2025
+  "2025-01-01", "2025-01-26", "2025-03-14", "2025-03-31", "2025-04-18",
+  "2025-05-01", "2025-08-15", "2025-10-02", "2025-10-20", "2025-11-05", "2025-12-25",
+  // 2026
+  "2026-01-01", "2026-01-26", "2026-03-04", "2026-03-20", "2026-04-03",
+  "2026-04-14", "2026-05-01", "2026-08-15", "2026-10-02", "2026-10-20",
+  "2026-11-08", "2026-12-25",
+  // 2027
+  "2027-01-01", "2027-01-26", "2027-03-22", "2027-03-26", "2027-05-01",
+  "2027-08-15", "2027-10-02", "2027-10-29", "2027-12-25"
+];
+
+const calculateWorkingHoursDetails = (startDateStr, endDateStr, hoursPerDay = 8) => {
+  if (!startDateStr || !endDateStr) return null;
+
+  const start = new Date(startDateStr);
+  const end = new Date(endDateStr);
+
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return null;
+
+  let totalDays = 0;
+  let workingDays = 0;
+  let weekendDays = 0;
+  let holidayDays = 0;
+
+  const current = new Date(start);
+  while (current <= end) {
+    totalDays++;
+    const dayOfWeek = current.getDay(); // 0 = Sun, 6 = Sat
+    const formattedDate = current.toISOString().split("T")[0];
+
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      weekendDays++;
+    } else if (PUBLIC_HOLIDAYS.includes(formattedDate)) {
+      holidayDays++;
+    } else {
+      workingDays++;
+    }
+
+    current.setDate(current.getDate() + 1);
+  }
+
+  const totalHours = workingDays * hoursPerDay;
+
+  return {
+    totalDays,
+    workingDays,
+    weekendDays,
+    holidayDays,
+    totalHours,
+  };
+};
+
 export function ProjectsView({
   projects,
   setProjects,
@@ -78,6 +133,7 @@ export function ProjectsView({
   });
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [calculationDetails, setCalculationDetails] = useState(null);
 
   const ITEMS_PER_PAGE = 9;
 
@@ -103,6 +159,7 @@ export function ProjectsView({
 
   const handleOpenAdd = () => {
     setEditingProject(null);
+    setCalculationDetails(null);
     setFormData({
       name: "",
       clientName: "",
@@ -141,11 +198,16 @@ export function ProjectsView({
 
   const handleOpenEdit = (project) => {
     setEditingProject(project);
+    const startStr = formatDateForInput(project.startDate);
+    const endStr = formatDateForInput(project.endDate);
+    const details = calculateWorkingHoursDetails(startStr, endStr);
+    setCalculationDetails(details);
+
     setFormData({
       name: project.name || "",
       clientName: project.clientName || "",
-      startDate: formatDateForInput(project.startDate),
-      endDate: formatDateForInput(project.endDate),
+      startDate: startStr,
+      endDate: endStr,
       allottedHours: project.allottedHours || "",
       employeeCount: project.employeeCount || "",
       assignedEmployees: Array.isArray(project.assignedEmployees)
@@ -163,7 +225,29 @@ export function ProjectsView({
 
   const handleFormChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+
+    setFormData((prev) => {
+      const nextForm = { ...prev, [name]: value };
+
+      if (name === "startDate" || name === "endDate") {
+        const startDate = name === "startDate" ? value : prev.startDate;
+        const endDate = name === "endDate" ? value : prev.endDate;
+
+        if (startDate && endDate) {
+          const details = calculateWorkingHoursDetails(startDate, endDate);
+          if (details) {
+            setCalculationDetails(details);
+            nextForm.allottedHours = String(details.totalHours);
+          } else {
+            setCalculationDetails(null);
+          }
+        } else {
+          setCalculationDetails(null);
+        }
+      }
+
+      return nextForm;
+    });
   };
 
   const handleSubmitForm = async (e) => {
@@ -179,9 +263,9 @@ export function ProjectsView({
 
     const parsedAssigned = formData.assignedEmployees
       ? formData.assignedEmployees
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
       : [];
 
     const payload = {
@@ -303,14 +387,14 @@ export function ProjectsView({
     const assignedList = Array.isArray(project.assignedEmployees)
       ? project.assignedEmployees
       : typeof project.assignedEmployees === "string"
-      ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
+        ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
 
     const empCount =
       assignedList.length > 0
         ? assignedList.length
         : Number(project.employeeCount) || 0;
-    
+
     const hoursPerEmp = empCount > 0 ? (hours / empCount).toFixed(1) : 0;
     // Standard estimated rate = $45/hr
     const estimatedCostPerEmp = Math.round(hoursPerEmp * 45);
@@ -489,8 +573,8 @@ export function ProjectsView({
             const assignedList = Array.isArray(selectedProject.assignedEmployees)
               ? selectedProject.assignedEmployees
               : selectedProject.assignedEmployees
-              ? selectedProject.assignedEmployees.split(",").map((s) => s.trim())
-              : [];
+                ? selectedProject.assignedEmployees.split(",").map((s) => s.trim())
+                : [];
 
             return (
               <>
@@ -742,7 +826,14 @@ export function ProjectsView({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="allottedHours">Allotted Hours (Total)</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="allottedHours">Allotted Hours (Total)</Label>
+                  {calculationDetails && (
+                    <span className="text-[10px] font-mono text-primary font-semibold">
+                      Auto-Calculated
+                    </span>
+                  )}
+                </div>
                 <Input
                   id="allottedHours"
                   name="allottedHours"
@@ -751,6 +842,19 @@ export function ProjectsView({
                   value={formData.allottedHours}
                   onChange={handleFormChange}
                 />
+                {calculationDetails && (
+                  <div className="text-[11px] text-muted-foreground bg-primary/5 p-2.5 rounded-lg border border-primary/20 space-y-1">
+                    <div className="flex items-center gap-1.5 font-medium text-foreground">
+                      <Clock className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span>
+                        <strong className="text-primary">{calculationDetails.workingDays} working days</strong> × 8 hrs/day = <strong className="text-primary">{calculationDetails.totalHours} hrs</strong>
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground pl-5">
+                      Excluded {calculationDetails.weekendDays} weekend days (Sat/Sun) & {calculationDetails.holidayDays} public holidays.
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid gap-2">
@@ -852,8 +956,8 @@ export function ProjectsView({
                 {isSubmitting
                   ? "Saving..."
                   : editingProject
-                  ? "Save Changes"
-                  : "Add Project"}
+                    ? "Save Changes"
+                    : "Add Project"}
               </Button>
             </DialogFooter>
           </form>
