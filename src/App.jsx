@@ -1,4 +1,5 @@
 import "./App.css";
+import API_BASE_URL from "./api";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -113,7 +114,7 @@ function App() {
 
     const fetchEmployees = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/employees");
+        const response = await fetch(`${API_BASE_URL}/api/employees`);
         const data = await response.json();
         setEmployees(data);
       } catch (error) {
@@ -123,7 +124,7 @@ function App() {
 
     const fetchProjects = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/projects");
+        const response = await fetch(`${API_BASE_URL}/api/projects`);
         const data = await response.json();
         if (Array.isArray(data)) {
           setProjects(data);
@@ -142,7 +143,7 @@ function App() {
     setLoginError("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/login", {
+      const response = await fetch(`${API_BASE_URL}/api/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -178,7 +179,7 @@ function App() {
   const handleAddEmployee = async () => {
     setFormError("");
     try {
-      const response = await fetch("http://localhost:5000/api/employees", {
+      const response = await fetch(`${API_BASE_URL}/api/employees`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -215,7 +216,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/employees/${targetId}`,
+        `${API_BASE_URL}/api/employees/${targetId}`,
         {
           method: "DELETE",
         }
@@ -251,7 +252,7 @@ function App() {
     setFormError("");
     try {
       const response = await fetch(
-        `http://localhost:5000/api/employees/${editingEmployee._id}`,
+        `${API_BASE_URL}/api/employees/${editingEmployee._id}`,
         {
           method: "PUT",
           headers: {
@@ -372,7 +373,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/projects/${project._id}`,
+        `${API_BASE_URL}/api/projects/${project._id}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },

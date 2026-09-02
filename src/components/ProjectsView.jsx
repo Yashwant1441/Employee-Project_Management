@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import API_BASE_URL from "../api";
 import {
   Card,
   CardContent,
@@ -281,7 +282,7 @@ export function ProjectsView({
     try {
       if (editingProject) {
         const res = await fetch(
-          `http://localhost:5000/api/projects/${editingProject._id}`,
+          `${API_BASE_URL}/api/projects/${editingProject._id}`,
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -301,7 +302,7 @@ export function ProjectsView({
           setSelectedProject(data);
         }
       } else {
-        const res = await fetch("http://localhost:5000/api/projects", {
+        const res = await fetch(`${API_BASE_URL}/api/projects`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -327,7 +328,7 @@ export function ProjectsView({
     if (!deletingProject) return;
     try {
       const res = await fetch(
-        `http://localhost:5000/api/projects/${deletingProject._id}`,
+        `${API_BASE_URL}/api/projects/${deletingProject._id}`,
         { method: "DELETE" }
       );
       if (res.ok) {
