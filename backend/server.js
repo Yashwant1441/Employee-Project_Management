@@ -7,11 +7,24 @@ const User = require("./models/User");
 const Project = require("./models/Project");
 
 const app = express();
-app.use(cors());
+app.use(
+    cors({
+        origin: [
+            "https://employee-projectmanagement.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000"
+        ],
+        credentials: true,
+    })
+);
 app.use(express.json());
 
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT;
+
+app.get("/", (req, res) => {
+    res.send("Employee Management Backend API is running successfully!");
+});
 
 mongoose.connect(MONGO_URI)
     .then(() => {
