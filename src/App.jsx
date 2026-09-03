@@ -30,6 +30,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "@/components/ui/sheet";
+import {
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -71,7 +79,22 @@ import { ProjectsView } from "@/components/ProjectsView";
 function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("app_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    try {
+      return !!localStorage.getItem("app_user");
+    } catch (e) {
+      return false;
+    }
+  });
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -112,11 +135,20 @@ function App() {
       return;
     }
 
+    const userId = currentUser?.id || currentUser?._id;
+    if (!userId) {
+      setEmployees([]);
+      setProjects([]);
+      return;
+    }
+
+    const userQuery = `?userId=${userId}`;
+
     const fetchEmployees = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/employees`);
+        const response = await fetch(`${API_BASE_URL}/api/employees${userQuery}`);
         const data = await response.json();
-        setEmployees(data);
+        setEmployees(Array.isArray(data) ? data : []);
       } catch (error) {
         console.log("Failed to fetch employees:", error);
       }
@@ -124,10 +156,12 @@ function App() {
 
     const fetchProjects = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/projects`);
+        const response = await fetch(`${API_BASE_URL}/api/projects${userQuery}`);
         const data = await response.json();
         if (Array.isArray(data)) {
           setProjects(data);
+        } else {
+          setProjects([]);
         }
       } catch (error) {
         console.log("Failed to fetch projects:", error);
@@ -136,14 +170,16 @@ function App() {
 
     fetchEmployees();
     fetchProjects();
-  }, [isLoggedIn]);
+  }, [isLoggedIn, currentUser]);
 
-  const handleLogin = async (event) => {
+  const handleAuthSubmit = async (event) => {
     event.preventDefault();
     setLoginError("");
 
+    const endpoint = isSignUp ? `${API_BASE_URL}/api/register` : `${API_BASE_URL}/api/login`;
+
     try {
-      const response = await fetch(`${API_BASE_URL}/api/login`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -157,27 +193,52 @@ function App() {
       const data = await response.json();
 
       if (response.ok) {
+        const userObj = {
+          id: data.user?.id || data.user?._id,
+          email: data.user?.email || email,
+        };
+        setCurrentUser(userObj);
+        try {
+          localStorage.setItem("app_user", JSON.stringify(userObj));
+        } catch (e) { }
+
+        if (isSignUp) {
+          setEmployees([]);
+          setProjects([]);
+        }
+
         setIsLoggedIn(true);
         setActiveTab("home");
       } else {
-        setLoginError(data.message);
+        setLoginError(data.message || (isSignUp ? "Sign up failed" : "Login failed"));
       }
     } catch (error) {
       setLoginError("Something went wrong. Please try again.");
-      console.log("Login failed:", error);
+      console.log("Auth failed:", error);
     }
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem("app_user");
+    } catch (e) { }
     setEmail("");
     setPassword("");
     setLoginError("");
+    setEmployees([]);
+    setProjects([]);
     setActiveTab("home");
   };
 
   const handleAddEmployee = async () => {
     setFormError("");
+    const activeUserId = currentUser?.id || currentUser?._id;
+    if (!activeUserId) {
+      setFormError("User session invalid. Please log out and log in again.");
+      return;
+    }
     try {
       const response = await fetch(`${API_BASE_URL}/api/employees`, {
         method: "POST",
@@ -188,6 +249,7 @@ function App() {
           employeeId,
           name,
           department,
+          userId: activeUserId,
         }),
       });
 
@@ -305,8 +367,8 @@ function App() {
     const assignedList = Array.isArray(project.assignedEmployees)
       ? project.assignedEmployees
       : typeof project.assignedEmployees === "string"
-      ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
+        ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
 
     const empNameLower = (employee.name || "").trim().toLowerCase();
     const empIdLower = (employee.employeeId || "").trim().toLowerCase();
@@ -333,8 +395,8 @@ function App() {
     const currentAssigned = Array.isArray(project.assignedEmployees)
       ? project.assignedEmployees
       : typeof project.assignedEmployees === "string"
-      ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
+        ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
 
     const isCurrentlyAssigned = isEmployeeAssigned(project, employee);
 
@@ -468,8 +530,8 @@ function App() {
                     AD
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-xs font-semibold">Admin Account</span>
-                    <span className="text-[10px] text-muted-foreground">{email || "admin@apex.com"}</span>
+                    <span className="text-xs font-semibold">User Account</span>
+                    <span className="text-[10px] text-muted-foreground">{currentUser?.email || email || "user@apex.com"}</span>
                   </div>
                 </div>
                 <ModeToggle />
@@ -499,8 +561,8 @@ function App() {
                     {activeTab === "home"
                       ? "Home Dashboard"
                       : activeTab === "projects"
-                      ? "Project Portfolio"
-                      : "Employee Management"}
+                        ? "Project Portfolio"
+                        : "Employee Management"}
                   </span>
                 </div>
               </div>
@@ -555,7 +617,7 @@ function App() {
                   <div>
                     <h2 className="text-lg font-bold mb-4 tracking-tight">Organization Metrics</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      
+
                       {/* Stat Card: Employees */}
                       <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => setActiveTab("employees")}>
                         <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -686,6 +748,7 @@ function App() {
                   projects={projects}
                   setProjects={setProjects}
                   employees={employees}
+                  currentUser={currentUser}
                 />
               )}
 
@@ -891,27 +954,27 @@ function App() {
           </div>
         </div>
 
-        {/* Add / Edit Employee Dialog Modal */}
-        <Dialog open={showAddForm} onOpenChange={(open) => setShowAddForm(open)}>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>
+        {/* Add / Edit Employee Right-Side Sheet Drawer */}
+        <Sheet open={showAddForm} onOpenChange={(open) => setShowAddForm(open)}>
+          <SheetContent side="right" className="sm:max-w-md">
+            <SheetHeader>
+              <SheetTitle>
                 {editingEmployee ? "Edit Employee" : "Add Employee"}
-              </DialogTitle>
-              <DialogDescription>
+              </SheetTitle>
+              <SheetDescription>
                 {editingEmployee
                   ? "Update the details for this employee below."
                   : "Enter the details below to add a new employee."}
-              </DialogDescription>
-            </DialogHeader>
+              </SheetDescription>
+            </SheetHeader>
 
             {formError && (
-              <div className="rounded-md bg-destructive/15 border border-destructive/30 p-3 text-xs text-destructive font-medium">
+              <div className="rounded-md bg-destructive/15 border border-destructive/30 p-3 text-xs text-destructive font-medium mt-4">
                 {formError}
               </div>
             )}
 
-            <div className="grid gap-4 py-2">
+            <div className="grid gap-4 py-4">
               <div className="grid gap-2">
                 <Label htmlFor="employeeId">Employee ID</Label>
                 <Input
@@ -941,7 +1004,7 @@ function App() {
               </div>
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-0">
+            <SheetFooter className="gap-2 sm:gap-0 mt-6">
               <Button variant="outline" onClick={() => setShowAddForm(false)}>
                 Cancel
               </Button>
@@ -950,9 +1013,9 @@ function App() {
               >
                 {editingEmployee ? "Save Changes" : "Add Employee"}
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
 
         {/* Delete Confirmation Dialog Modal */}
         <Dialog
@@ -981,8 +1044,8 @@ function App() {
           </DialogContent>
         </Dialog>
 
-        {/* Assign Projects Dialog Modal */}
-        <Dialog
+        {/* Assign Projects Right-Side Sheet Drawer */}
+        <Sheet
           open={!!assigningEmployeeProjects}
           onOpenChange={(open) => {
             if (!open) {
@@ -991,18 +1054,18 @@ function App() {
             }
           }}
         >
-          <DialogContent className="sm:max-w-[550px] max-h-[85vh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+          <SheetContent side="right" className="sm:max-w-md md:max-w-lg">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2">
                 <Briefcase className="h-5 w-5 text-primary" />
                 Assign Projects to {assigningEmployeeProjects?.name}
-              </DialogTitle>
-              <DialogDescription>
+              </SheetTitle>
+              <SheetDescription>
                 Select projects to assign or remove for this employee.
-              </DialogDescription>
-            </DialogHeader>
+              </SheetDescription>
+            </SheetHeader>
 
-            <div className="relative my-2">
+            <div className="relative my-4">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 type="text"
@@ -1013,7 +1076,7 @@ function App() {
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1 py-1 max-h-[380px]">
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1 py-1 max-h-[480px]">
               {projects
                 .filter((project) => {
                   const q = projectSearchQuery.trim().toLowerCase();
@@ -1027,20 +1090,19 @@ function App() {
                   const assignedList = Array.isArray(project.assignedEmployees)
                     ? project.assignedEmployees
                     : typeof project.assignedEmployees === "string"
-                    ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
-                    : [];
+                      ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
+                      : [];
                   const isAssigned = isEmployeeAssigned(project, assigningEmployeeProjects);
 
                   return (
                     <div
                       key={project._id}
-                      className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
-                        isAssigned
-                          ? "bg-primary/5 border-primary/30"
-                          : "bg-card border-border hover:border-primary/20"
-                      }`}
+                      className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${isAssigned
+                        ? "bg-primary/5 border-primary/30"
+                        : "bg-card border-border hover:border-primary/20"
+                        }`}
                     >
-                      <div className="space-y-1 max-w-[320px]">
+                      <div className="space-y-1 max-w-[260px]">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-sm text-foreground truncate">
                             {project.name}
@@ -1053,59 +1115,46 @@ function App() {
                         </div>
                         <div className="text-xs text-muted-foreground flex items-center gap-2">
                           <span>Client: {project.clientName}</span>
-                          <span>•</span>
-                          <span>
-                            {assignedList.length > 0 ? assignedList.length : (project.employeeCount || 0)} Employees
-                          </span>
                         </div>
                       </div>
 
                       <Button
                         size="sm"
-                        variant={isAssigned ? "destructive" : "default"}
+                        variant={isAssigned ? "outline" : "default"}
                         disabled={isAssigning}
                         onClick={() =>
-                          handleToggleProjectAssignment(project, assigningEmployeeProjects)
+                          handleToggleProjectAssignment(
+                            project,
+                            assigningEmployeeProjects
+                          )
                         }
-                        className="shrink-0"
                       >
-                        {isAssigned ? (
-                          <>Remove</>
-                        ) : (
-                          <>
-                            <Plus className="mr-1 h-3.5 w-3.5" /> Assign
-                          </>
-                        )}
+                        {isAssigned ? "Unassign" : "Assign"}
                       </Button>
                     </div>
                   );
                 })}
-
-              {projects.length === 0 && (
-                <div className="text-center p-6 text-sm text-muted-foreground">
-                  No projects available in database. Create a project in the Projects tab first.
-                </div>
-              )}
             </div>
 
-            <DialogFooter className="pt-3 border-t border-border">
+            <SheetFooter className="mt-6">
               <Button
-                variant="outline"
+                variant="secondary"
+                className="w-full"
                 onClick={() => {
                   setAssigningEmployeeProjects(null);
                   setProjectSearchQuery("");
                 }}
               >
-                Close
+                Done
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
       </SidebarProvider>
     );
   }
 
-  // Official shadcn/ui Login Card layout
+  // Official shadcn/ui Login / Sign Up Card layout
   return (
     <div className="relative flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-background text-foreground font-sans">
       <div className="absolute top-4 right-4">
@@ -1113,12 +1162,14 @@ function App() {
       </div>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Login to your account</CardTitle>
+          <CardTitle>{isSignUp ? "Create a new account" : "Login to your account"}</CardTitle>
           <CardDescription>
-            Enter your email below to login to your account
+            {isSignUp
+              ? "Enter your email below to create a new account"
+              : "Enter your email below to login to your account"}
           </CardDescription>
         </CardHeader>
-        <form onSubmit={handleLogin}>
+        <form onSubmit={handleAuthSubmit}>
           <CardContent>
             <div className="flex flex-col gap-6">
               <div className="grid gap-2">
@@ -1133,15 +1184,17 @@ function App() {
                 />
               </div>
               <div className="grid gap-2">
-                <div className="flex items-center">
+                <div className="flex items-center justify-between">
                   <Label htmlFor="password">Password</Label>
-                  <a
-                    href="#"
-                    onClick={(e) => e.preventDefault()}
-                    className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
-                  >
-                    Forgot your password?
-                  </a>
+                  {!isSignUp && (
+                    <a
+                      href="#"
+                      onClick={(e) => e.preventDefault()}
+                      className="inline-block text-xs text-muted-foreground underline-offset-4 hover:underline"
+                    >
+                      Forgot your password?
+                    </a>
+                  )}
                 </div>
                 <Input
                   id="password"
@@ -1153,15 +1206,23 @@ function App() {
               </div>
             </div>
           </CardContent>
-          <CardFooter className="flex-col gap-2">
+          <CardFooter className="flex-col gap-3">
             <Button type="submit" className="w-full">
-              Login
+              {isSignUp ? "Create Account" : "Login"}
             </Button>
-            <Button variant="outline" className="w-full" type="button">
-              Sign Up
+            <Button
+              variant="outline"
+              className="w-full"
+              type="button"
+              onClick={() => {
+                setIsSignUp(!isSignUp);
+                setLoginError("");
+              }}
+            >
+              {isSignUp ? "Already have an account? Login" : "Don't have an account? Sign Up"}
             </Button>
             {loginError && (
-              <div className="rounded-md border border-rose-800/30 bg-white-200 p-3 text-center text-xs font-medium text-red-600 w-full">
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-center text-xs font-medium text-destructive w-full">
                 {loginError}
               </div>
             )}

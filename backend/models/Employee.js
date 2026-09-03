@@ -3,8 +3,7 @@ const mongoose = require("mongoose");
 const employeeSchema = new mongoose.Schema({
     employeeId: {
         type: String,
-        required: true,
-        unique: true
+        required: true
     },
 
     name: {
@@ -15,8 +14,16 @@ const employeeSchema = new mongoose.Schema({
     department: {
         type: String,
         required: true
+    },
+
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: false
     }
 });
+
+employeeSchema.index({ employeeId: 1, userId: 1 }, { unique: true });
 
 const Employee = mongoose.model("Employee", employeeSchema);
 

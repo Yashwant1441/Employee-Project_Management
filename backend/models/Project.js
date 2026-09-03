@@ -50,6 +50,20 @@ const projectSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    status: {
+      type: String,
+      enum: ["Pending", "In Progress", "Completed", "Delayed"],
+      default: "In Progress",
+    },
+    version: {
+      type: String,
+      default: "1.0.0",
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: false,
+    },
   },
   { timestamps: true }
 );

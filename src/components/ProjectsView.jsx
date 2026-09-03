@@ -20,6 +20,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "@/components/ui/sheet";
+import {
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -48,6 +56,7 @@ import {
   Server,
   Layers,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 
 // Standard Public Holidays list (YYYY-MM-DD format)
@@ -63,6 +72,37 @@ const PUBLIC_HOLIDAYS = [
   "2027-01-01", "2027-01-26", "2027-03-22", "2027-03-26", "2027-05-01",
   "2027-08-15", "2027-10-02", "2027-10-29", "2027-12-25"
 ];
+
+const getStatusBadge = (status) => {
+  const s = status || "In Progress";
+  switch (s) {
+    case "Completed":
+      return (
+        <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400 font-semibold text-[11px] px-2 py-0.5">
+          ✓ Completed
+        </Badge>
+      );
+    case "Delayed":
+      return (
+        <Badge variant="outline" className="bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400 font-semibold text-[11px] px-2 py-0.5">
+          ⚠ Delayed
+        </Badge>
+      );
+    case "Pending":
+      return (
+        <Badge variant="outline" className="bg-slate-500/10 text-slate-600 border-slate-500/30 dark:text-slate-400 font-semibold text-[11px] px-2 py-0.5">
+          ⏱ Pending
+        </Badge>
+      );
+    case "In Progress":
+    default:
+      return (
+        <Badge variant="outline" className="bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400 font-semibold text-[11px] px-2 py-0.5">
+          ⚡ In Progress
+        </Badge>
+      );
+  }
+};
 
 const calculateWorkingHoursDetails = (startDateStr, endDateStr, hoursPerDay = 8) => {
   if (!startDateStr || !endDateStr) return null;
@@ -109,6 +149,7 @@ export function ProjectsView({
   projects,
   setProjects,
   employees = [],
+  currentUser = null,
 }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
@@ -117,6 +158,7 @@ export function ProjectsView({
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
+  const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -124,13 +166,13 @@ export function ProjectsView({
     startDate: "",
     endDate: "",
     allottedHours: "",
-    employeeCount: "",
     assignedEmployees: "",
     theme: "",
     database: "",
     language: "",
-    extraRequirements: "",
     deploymentLocation: "",
+    status: "In Progress",
+    version: "1.0.0",
   });
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -167,13 +209,13 @@ export function ProjectsView({
       startDate: "",
       endDate: "",
       allottedHours: "",
-      employeeCount: "",
       assignedEmployees: "",
       theme: "",
       database: "",
       language: "",
-      extraRequirements: "",
       deploymentLocation: "",
+      status: "In Progress",
+      version: "1.0.0",
     });
     setFormError("");
     setShowFormModal(true);
@@ -210,15 +252,15 @@ export function ProjectsView({
       startDate: startStr,
       endDate: endStr,
       allottedHours: project.allottedHours || "",
-      employeeCount: project.employeeCount || "",
       assignedEmployees: Array.isArray(project.assignedEmployees)
         ? project.assignedEmployees.join(", ")
         : project.assignedEmployees || "",
       theme: project.theme || "",
       database: project.database || "",
       language: project.language || "",
-      extraRequirements: project.extraRequirements || "",
       deploymentLocation: project.deploymentLocation || "",
+      status: project.status || "In Progress",
+      version: project.version || "1.0.0",
     });
     setFormError("");
     setShowFormModal(true);
@@ -269,6 +311,13 @@ export function ProjectsView({
         .filter(Boolean)
       : [];
 
+    const activeUserId = currentUser?.id || currentUser?._id;
+    if (!activeUserId) {
+      setFormError("User session invalid. Please log out and log in again.");
+      setIsSubmitting(false);
+      return;
+    }
+
     const payload = {
       ...formData,
       allottedHours: Number(formData.allottedHours) || 0,
@@ -277,6 +326,7 @@ export function ProjectsView({
           ? Number(formData.employeeCount)
           : parsedAssigned.length || 1,
       assignedEmployees: parsedAssigned,
+      userId: activeUserId,
     };
 
     try {
@@ -417,9 +467,6 @@ export function ProjectsView({
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
               Project Portfolio
             </h1>
-            <Badge variant="secondary" className="font-mono text-xs">
-              9 Cards / Page
-            </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
             Overview of active client projects, team allotments, tech stack history, and cloud deployments.
@@ -481,20 +528,19 @@ export function ProjectsView({
                 onClick={() => setSelectedProject(project)}
                 className="group relative cursor-pointer overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:border-primary/50 border border-border bg-card flex flex-col justify-between"
               >
-                {/* Visual Accent Header Bar */}
-                {/* <div className="h-1.5 w-full bg-gradient-to-r from-primary/80 via-primary to-primary/40 group-hover:from-primary group-hover:to-primary transition-all" /> */}
-
                 <CardHeader className="p-6">
                   <div className="flex items-start justify-between gap-3">
                     <div className="h-10 w-10 shrink-0 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold border border-primary/20 group-hover:bg-primary group-hover:text-primary-foreground transition-all">
                       <Briefcase className="h-5 w-5" />
                     </div>
-                    <Badge variant="outline" className="text-[10px] text-muted-foreground group-hover:border-primary/40">
-                      Click to expand
-                    </Badge>
+                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      <Badge variant="secondary" className="text-[10px] font-mono px-2 py-0.5">
+                        v{project.version || "1.0.0"}
+                      </Badge>
+                      {getStatusBadge(project.status)}
+                    </div>
                   </div>
 
-                  {/* ONLY Project Name and Client Name on Collapsed Card */}
                   <div className="mt-4 space-y-1">
                     <CardTitle className="text-xl font-extrabold tracking-tight text-foreground group-hover:text-primary transition-colors line-clamp-1">
                       {project.name}
@@ -563,12 +609,12 @@ export function ProjectsView({
         </>
       )}
 
-      {/* EXPANDED PROJECT DETAILS DIALOG MODAL */}
-      <Dialog
+      {/* PROJECT DETAILS RIGHT-SIDE SHEET DRAWER */}
+      <Sheet
         open={!!selectedProject}
         onOpenChange={(open) => !open && setSelectedProject(null)}
       >
-        <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto p-6 md:p-8">
+        <SheetContent side="right" className="sm:max-w-md md:max-w-xl">
           {selectedProject && (() => {
             const metrics = calculateCostMetrics(selectedProject);
             const assignedList = Array.isArray(selectedProject.assignedEmployees)
@@ -579,31 +625,25 @@ export function ProjectsView({
 
             return (
               <>
-                <DialogHeader className="border-b border-border pb-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <Badge variant="outline" className="mb-2 text-xs font-mono">
-                        Project Details
-                      </Badge>
-                      <DialogTitle className="text-2xl font-bold tracking-tight text-foreground">
-                        {selectedProject.name}
-                      </DialogTitle>
-                      <DialogDescription className="text-sm font-medium text-muted-foreground flex items-center gap-1.5 mt-1">
-                        <Building2 className="h-4 w-4 text-primary" /> Client:{" "}
-                        <span className="text-foreground font-semibold">
-                          {selectedProject.clientName}
-                        </span>
-                      </DialogDescription>
-                    </div>
-
-                    <div className="shrink-0">
-                      {getDeploymentBadge(selectedProject.deploymentLocation)}
-                    </div>
+                <SheetHeader className="border-b border-border pb-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant="outline" className="text-xs font-mono">
+                      v{selectedProject.version || "1.0.0"}
+                    </Badge>
+                    {getStatusBadge(selectedProject.status)}
                   </div>
-                </DialogHeader>
+                  <SheetTitle className="text-2xl font-bold tracking-tight text-foreground mt-2">
+                    {selectedProject.name}
+                  </SheetTitle>
+                  <SheetDescription className="text-sm font-medium text-muted-foreground flex items-center gap-1.5 mt-1">
+                    <Building2 className="h-4 w-4 text-primary" /> Client:{" "}
+                    <span className="text-foreground font-semibold">
+                      {selectedProject.clientName}
+                    </span>
+                  </SheetDescription>
+                </SheetHeader>
 
-                {/* All Detailed Inputs Displayed cleanly */}
-                <div className="space-y-6 py-4 text-sm">
+                <div className="space-y-6 py-6 text-sm">
                   {/* Timeline & Date Range */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/40 p-4 rounded-xl border border-border/60">
                     <div className="flex items-center gap-3">
@@ -623,7 +663,7 @@ export function ProjectsView({
                         <Calendar className="h-4 w-4" />
                       </div>
                       <div>
-                        <div className="text-xs text-muted-foreground font-medium">Target Completion (End Date)</div>
+                        <div className="text-xs text-muted-foreground font-medium">Target Completion</div>
                         <div className="font-semibold text-foreground">
                           {formatDateForDisplay(selectedProject.endDate)}
                         </div>
@@ -631,8 +671,8 @@ export function ProjectsView({
                     </div>
                   </div>
 
-                  {/* Hours & Cost Per Employee Metric Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Hours & Team Size Metric Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="p-3.5 rounded-xl border border-border bg-card">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
                         <Clock className="h-3.5 w-3.5 text-primary" /> Total Hours
@@ -645,18 +685,6 @@ export function ProjectsView({
                         <Users className="h-3.5 w-3.5 text-indigo-500" /> Team Size
                       </div>
                       <div className="text-xl font-bold font-mono">{metrics.empCount} Employees</div>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl border border-border bg-card bg-primary/5">
-                      <div className="flex items-center gap-2 text-xs text-primary font-semibold mb-1">
-                        <DollarSign className="h-3.5 w-3.5" /> Hours / Employee
-                      </div>
-                      <div className="text-xl font-bold font-mono text-primary">
-                        {metrics.hoursPerEmp} hrs
-                      </div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5">
-                        ~${metrics.estimatedCostPerEmp.toLocaleString()} cost/emp
-                      </div>
                     </div>
                   </div>
 
@@ -678,103 +706,53 @@ export function ProjectsView({
                       <div className="text-xs text-muted-foreground italic">No team members assigned yet.</div>
                     )}
                   </div>
-
-                  {/* Tech Stack & History Info Grid */}
-                  <div className="space-y-3 pt-2 border-t border-border">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Technical Stack & History Metadata
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="p-3 rounded-lg border border-border/70 bg-card">
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1">
-                          <Code2 className="h-3 w-3 text-sky-500" /> Programming Language
-                        </div>
-                        <div className="font-semibold text-xs text-foreground">
-                          {selectedProject.language || "Not specified"}
-                        </div>
-                      </div>
-
-                      <div className="p-3 rounded-lg border border-border/70 bg-card">
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1">
-                          <Database className="h-3 w-3 text-emerald-500" /> Database Used
-                        </div>
-                        <div className="font-semibold text-xs text-foreground">
-                          {selectedProject.database || "Not specified"}
-                        </div>
-                      </div>
-
-                      <div className="p-3 rounded-lg border border-border/70 bg-card">
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1">
-                          <Palette className="h-3 w-3 text-violet-500" /> Project Theme
-                        </div>
-                        <div className="font-semibold text-xs text-foreground">
-                          {selectedProject.theme || "Standard Default"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Extra Client Requirements */}
-                  <div className="space-y-1.5 pt-2 border-t border-border">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                      <FileText className="h-3.5 w-3.5 text-primary" /> Extra Client Requirements
-                    </div>
-                    <div className="p-3 rounded-xl bg-muted/30 border border-border text-xs leading-relaxed text-foreground whitespace-pre-wrap">
-                      {selectedProject.extraRequirements || "No special client instructions recorded."}
-                    </div>
-                  </div>
                 </div>
 
-                <DialogFooter className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-border pt-4">
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                <SheetFooter className="gap-2 sm:gap-0 mt-6 border-t border-border pt-6">
+                  <div className="flex items-center gap-2 w-full">
                     <Button
                       variant="outline"
-                      size="sm"
+                      className="flex-1"
                       onClick={() => handleOpenEdit(selectedProject)}
                     >
-                      <Edit3 className="mr-1.5 h-3.5 w-3.5" /> Edit Project
+                      <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
                     <Button
                       variant="ghost"
-                      size="sm"
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                       onClick={() => setDeletingProject(selectedProject)}
                     >
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                  <Button variant="secondary" size="sm" onClick={() => setSelectedProject(null)}>
-                    Close Details
-                  </Button>
-                </DialogFooter>
+                </SheetFooter>
               </>
             );
           })()}
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
-      {/* ADD / EDIT PROJECT DIALOG FORM */}
-      <Dialog open={showFormModal} onOpenChange={(open) => setShowFormModal(open)}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
+      {/* ADD / EDIT PROJECT RIGHT-SIDE SHEET DRAWER FORM */}
+      <Sheet open={showFormModal} onOpenChange={(open) => setShowFormModal(open)}>
+        <SheetContent side="right" className="sm:max-w-md md:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>
               {editingProject ? "Edit Project Details" : "Add New Project"}
-            </DialogTitle>
-            <DialogDescription>
+            </SheetTitle>
+            <SheetDescription>
               {editingProject
                 ? "Update the project specification and team assignments below."
                 : "Fill in all 12 project attributes to store in your portfolio."}
-            </DialogDescription>
-          </DialogHeader>
+            </SheetDescription>
+          </SheetHeader>
 
           {formError && (
-            <div className="rounded-md bg-destructive/15 border border-destructive/30 p-3 text-xs text-destructive font-medium">
+            <div className="rounded-md bg-destructive/15 border border-destructive/30 p-3 text-xs text-destructive font-medium mt-4">
               {formError}
             </div>
           )}
 
-          <form onSubmit={handleSubmitForm} className="space-y-4 py-2">
+          <form onSubmit={handleSubmitForm} className="space-y-4 py-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="name">Project Name *</Label>
@@ -827,14 +805,7 @@ export function ProjectsView({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="allottedHours">Allotted Hours (Total)</Label>
-                  {calculationDetails && (
-                    <span className="text-[10px] font-mono text-primary font-semibold">
-                      Auto-Calculated
-                    </span>
-                  )}
-                </div>
+                <Label htmlFor="allottedHours">Allotted Hours (Total)</Label>
                 <Input
                   id="allottedHours"
                   name="allottedHours"
@@ -843,54 +814,114 @@ export function ProjectsView({
                   value={formData.allottedHours}
                   onChange={handleFormChange}
                 />
-                {calculationDetails && (
-                  <div className="text-[11px] text-muted-foreground bg-primary/5 p-2.5 rounded-lg border border-primary/20 space-y-1">
-                    <div className="flex items-center gap-1.5 font-medium text-foreground">
-                      <Clock className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>
-                        <strong className="text-primary">{calculationDetails.workingDays} working days</strong> × 8 hrs/day = <strong className="text-primary">{calculationDetails.totalHours} hrs</strong>
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-muted-foreground pl-5">
-                      Excluded {calculationDetails.weekendDays} weekend days (Sat/Sun) & {calculationDetails.holidayDays} public holidays.
-                    </div>
-                  </div>
-                )}
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="employeeCount">No. of Employees Allotted</Label>
-                <Input
-                  id="employeeCount"
-                  name="employeeCount"
-                  type="number"
-                  placeholder="e.g. 4"
-                  value={formData.employeeCount}
+                <Label htmlFor="status">Project Status</Label>
+                <select
+                  id="status"
+                  name="status"
+                  value={formData.status || "In Progress"}
                   onChange={handleFormChange}
-                />
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="In Progress">⚡ In Progress</option>
+                  <option value="Pending">⏱ Pending</option>
+                  <option value="Completed">✓ Completed</option>
+                  <option value="Delayed">⚠ Delayed</option>
+                </select>
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="assignedEmployees">
-                Assigned Employee Names (Comma separated)
-              </Label>
-              <Input
-                id="assignedEmployees"
-                name="assignedEmployees"
-                list="employee-suggestions-list"
-                placeholder="e.g. Alex Morgan, Sarah Jenkins, David Miller"
-                value={formData.assignedEmployees}
-                onChange={handleFormChange}
-              />
-              <datalist id="employee-suggestions-list">
-                {employees.map((emp) => (
-                  <option key={emp._id || emp.employeeId} value={emp.name}>
-                    {emp.name} ({emp.department || emp.employeeId})
-                  </option>
-                ))}
-              </datalist>
-            </div>
+            {/* MULTI-SELECT EMPLOYEE ASSIGNMENT DROPDOWN */}
+            {(() => {
+              const selectedNames = formData.assignedEmployees
+                ? formData.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
+                : [];
+
+              const toggleEmployee = (empName) => {
+                let updated;
+                if (selectedNames.includes(empName)) {
+                  updated = selectedNames.filter((n) => n !== empName);
+                } else {
+                  updated = [...selectedNames, empName];
+                }
+                setFormData((prev) => ({
+                  ...prev,
+                  assignedEmployees: updated.join(", "),
+                }));
+              };
+
+              return (
+                <div className="grid gap-2">
+                  <Label htmlFor="assignedEmployees">
+                    Assigned Employees (Multi-select)
+                  </Label>
+                  <div className="relative">
+                    <div
+                      onClick={() => setIsEmployeeDropdownOpen(!isEmployeeDropdownOpen)}
+                      className="min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background flex flex-wrap items-center gap-1.5 cursor-pointer hover:border-ring transition-colors"
+                    >
+                      {selectedNames.length > 0 ? (
+                        selectedNames.map((empName, i) => (
+                          <Badge
+                            key={i}
+                            variant="secondary"
+                            className="flex items-center gap-1 px-2 py-0.5 text-xs bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20"
+                          >
+                            <span>{empName}</span>
+                            <span
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleEmployee(empName);
+                              }}
+                              className="hover:text-destructive cursor-pointer ml-0.5 font-bold"
+                            >
+                              ×
+                            </span>
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-muted-foreground text-xs">
+                          Select employees...
+                        </span>
+                      )}
+                      <div className="ml-auto pointer-events-none text-muted-foreground">
+                        <ChevronDown className="h-4 w-4" />
+                      </div>
+                    </div>
+
+                    {isEmployeeDropdownOpen && (
+                      <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-1">
+                        {employees.length > 0 ? (
+                          employees.map((emp) => {
+                            const isSelected = selectedNames.includes(emp.name);
+                            return (
+                              <div
+                                key={emp._id || emp.employeeId}
+                                onClick={() => toggleEmployee(emp.name)}
+                                className={`flex items-center justify-between px-3 py-2 text-xs rounded-sm cursor-pointer select-none transition-colors ${
+                                  isSelected
+                                    ? "bg-primary/15 text-primary font-semibold"
+                                    : "hover:bg-accent hover:text-accent-foreground"
+                                }`}
+                              >
+                                <span>{emp.name}</span>
+                                {isSelected && <span className="text-primary text-xs">✓</span>}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="p-3 text-xs text-muted-foreground text-center">
+                            No employees found.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="grid gap-2">
@@ -927,43 +958,49 @@ export function ProjectsView({
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="deploymentLocation">Where Deployed?</Label>
-              <Input
-                id="deploymentLocation"
-                name="deploymentLocation"
-                placeholder="e.g. Azure Cloud / AWS / Vercel / Render"
-                value={formData.deploymentLocation}
-                onChange={handleFormChange}
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="deploymentLocation">Where Deployed?</Label>
+                <Input
+                  id="deploymentLocation"
+                  name="deploymentLocation"
+                  placeholder="e.g. Azure Cloud / AWS / Vercel"
+                  value={formData.deploymentLocation}
+                  onChange={handleFormChange}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="version">Project Version</Label>
+                <Input
+                  id="version"
+                  name="version"
+                  placeholder="e.g. 1.0.0"
+                  value={formData.version}
+                  onChange={handleFormChange}
+                />
+              </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="extraRequirements">Extra Client Requirements</Label>
-              <Input
-                id="extraRequirements"
-                name="extraRequirements"
-                placeholder="e.g. SSO OAuth2, WebSocket integration, special compliance"
-                value={formData.extraRequirements}
-                onChange={handleFormChange}
-              />
-            </div>
-
-            <DialogFooter className="pt-4 border-t border-border gap-2 sm:gap-0">
-              <Button type="button" variant="outline" onClick={() => setShowFormModal(false)}>
+            <SheetFooter className="gap-2 sm:gap-0 mt-6">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowFormModal(false)}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting
                   ? "Saving..."
                   : editingProject
-                    ? "Save Changes"
+                    ? "Update Project"
                     : "Add Project"}
               </Button>
-            </DialogFooter>
+            </SheetFooter>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       {/* DELETE CONFIRMATION MODAL */}
       <Dialog
