@@ -208,27 +208,27 @@ function MultiSelectDropdown({
   );
 
   return (
-    <div className="grid gap-2">
-      <Label>{label}</Label>
-      <div className="relative" ref={dropdownRef}>
+    <div className="flex flex-col gap-1.5 min-w-0 w-full">
+      <Label className="text-xs font-semibold text-foreground/90 flex items-center min-h-[20px] leading-tight truncate">{label}</Label>
+      <div className="relative w-full min-w-0" ref={dropdownRef}>
         <div
           onClick={() => setIsOpen(!isOpen)}
-          className="min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background flex flex-wrap items-center gap-1.5 cursor-pointer hover:border-ring transition-colors shadow-xs"
+          className="min-h-10 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm ring-offset-background flex flex-wrap items-center gap-1.5 cursor-pointer hover:border-ring transition-colors shadow-xs min-w-0"
         >
           {selectedItems.length > 0 ? (
             selectedItems.map((item, i) => (
               <Badge
                 key={i}
                 variant="secondary"
-                className="flex items-center gap-1 px-2 py-0.5 text-xs bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20"
+                className="flex items-center gap-1 px-2 py-0.5 text-xs bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 max-w-full min-w-0"
               >
-                <span>{item}</span>
+                <span className="truncate max-w-[130px] inline-block">{item}</span>
                 <span
                   onClick={(e) => {
                     e.stopPropagation();
                     toggleItem(item);
                   }}
-                  className="hover:text-destructive cursor-pointer ml-0.5 font-bold"
+                  className="hover:text-destructive cursor-pointer ml-0.5 font-bold shrink-0"
                 >
                   ×
                 </span>
@@ -566,6 +566,7 @@ export function ProjectsView({
       theme: fullProject.theme || "",
       database: fullProject.database || "",
       language: fullProject.language || "",
+      extraRequirements: fullProject.extraRequirements || "",
       deploymentLocation: fullProject.deploymentLocation || "",
       status: fullProject.status || "In Progress",
       version: fullProject.version || "1.0.0",
@@ -839,7 +840,7 @@ export function ProjectsView({
             {paginatedProjects.map((project) => (
               <Card
                 key={project.id || project._id}
-                onClick={() => handleSelectProject(project)}
+                onClick={() => setSelectedProject(project)}
                 className="group relative cursor-pointer overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:border-primary/50 border border-border bg-card flex flex-col justify-between"
               >
                 <CardHeader className="p-6">
@@ -1314,7 +1315,7 @@ export function ProjectsView({
               );
             })()}
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start w-full">
               <MultiSelectDropdown
                 label="Theme to Use"
                 value={formData.theme}
@@ -1346,7 +1347,7 @@ export function ProjectsView({
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start w-full">
               <MultiSelectDropdown
                 label="Where Deployed?"
                 value={formData.deploymentLocation}
@@ -1357,8 +1358,8 @@ export function ProjectsView({
                 }
               />
 
-              <div className="grid gap-2">
-                <Label htmlFor="version">Project Version</Label>
+              <div className="flex flex-col gap-1.5 min-w-0 w-full">
+                <Label htmlFor="version" className="text-xs font-semibold text-foreground/90 flex items-center min-h-[20px] leading-tight truncate">Project Version</Label>
                 <Input
                   id="version"
                   name="version"

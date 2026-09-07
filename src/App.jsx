@@ -1,7 +1,7 @@
 import "./App.css";
 import API_BASE_URL from "./api";
 import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -94,6 +94,13 @@ const generateNextEmployeeId = (employeesList = []) => {
 };
 
 function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const activeTab = location.pathname === "/projects"
+    ? "projects"
+    : location.pathname === "/employees"
+      ? "employees"
+      : "home";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
@@ -124,7 +131,6 @@ function App() {
   const [formError, setFormError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [activeTab, setActiveTab] = useState("home");
   const [assigningEmployeeProjects, setAssigningEmployeeProjects] = useState(null);
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
   const [isAssigning, setIsAssigning] = useState(false);
@@ -265,7 +271,7 @@ function App() {
         }
 
         setIsLoggedIn(true);
-        setActiveTab("home");
+        navigate("/")
       } else {
         setLoginError(data.message || (isSignUp ? "Sign up failed" : "Login failed"));
       }
@@ -287,7 +293,7 @@ function App() {
     setLoginError("");
     setEmployees([]);
     setProjects([]);
-    setActiveTab("home");
+    navigate("/")
   };
 
   const handleAddEmployee = async () => {
@@ -507,7 +513,7 @@ function App() {
         <div className="flex min-h-screen w-full bg-background text-foreground">
           {/* Main shadcn Sidebar */}
           <Sidebar>
-            <SidebarHeader className="gap-3 cursor-pointer" onClick={() => setActiveTab("home")}>
+            <SidebarHeader className="gap-3 cursor-pointer" onClick={() => navigate("/")}>
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold shadow-sm">
                 <Building2 className="h-5 w-5" />
               </div>
@@ -528,7 +534,7 @@ function App() {
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       isActive={activeTab === "home"}
-                      onClick={() => setActiveTab("home")}
+                      onClick={() => navigate("/")}
                     >
                       <Home className="h-4 w-4" />
                       <span className="flex-1">Home</span>
@@ -541,7 +547,7 @@ function App() {
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       isActive={activeTab === "employees"}
-                      onClick={() => setActiveTab("employees")}
+                      onClick={() => navigate("/employees")}
                     >
                       <Users className="h-4 w-4" />
                       <span className="flex-1">Employees</span>
@@ -554,7 +560,7 @@ function App() {
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       isActive={activeTab === "projects"}
-                      onClick={() => setActiveTab("projects")}
+                      onClick={() => navigate("/projects")}
                     >
                       <Briefcase className="h-4 w-4" />
                       <span className="flex-1">Projects</span>
@@ -626,8 +632,10 @@ function App() {
             {/* Main Dynamic View Content */}
             <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-6">
 
-              {/* HOME PAGE VIEW */}
-              {activeTab === "home" && (
+              <Routes>
+                <Route
+                  path="/"
+                  element={
                 <div className="space-y-8 max-w-5xl mx-auto">
                   {/* Hero Header */}
                   <div className="rounded-2xl border border-border bg-card p-6 md:p-8 shadow-xs relative overflow-hidden">
@@ -651,7 +659,7 @@ function App() {
                         </div>
                       </div>
 
-                      <Button onClick={() => setActiveTab("employees")} size="sm">
+                      <Button onClick={() => navigate("/employees")} size="sm">
                         <Users className="mr-2 h-4 w-4" /> Manage Employees
                       </Button>
                     </div>
@@ -663,7 +671,7 @@ function App() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
                       {/* Stat Card: Employees */}
-                      <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => setActiveTab("employees")}>
+                      <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => navigate("/employees")}>
                         <CardHeader className="flex flex-row items-center justify-between pb-2">
                           <CardTitle className="text-sm font-semibold text-muted-foreground">
                             Number of Employees
@@ -686,7 +694,7 @@ function App() {
                       </Card>
 
                       {/* Stat Card: Projects */}
-                      <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => setActiveTab("projects")}>
+                      <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => navigate("/projects")}>
                         <CardHeader className="flex flex-row items-center justify-between pb-2">
                           <CardTitle className="text-sm font-semibold text-muted-foreground">
                             Active Projects
@@ -750,7 +758,7 @@ function App() {
                         variant="outline"
                         className="justify-between"
                         onClick={() => {
-                          setActiveTab("employees");
+                          navigate("/employees");
                           handleOpenAddModal();
                         }}
                       >
@@ -763,7 +771,7 @@ function App() {
                       <Button
                         variant="outline"
                         className="justify-between"
-                        onClick={() => setActiveTab("projects")}
+                        onClick={() => navigate("/projects")}
                       >
                         <span className="flex items-center gap-2">
                           <Briefcase className="h-4 w-4" /> View Projects ({projects.length})
@@ -774,7 +782,7 @@ function App() {
                       <Button
                         variant="outline"
                         className="justify-between"
-                        onClick={() => setActiveTab("employees")}
+                        onClick={() => navigate("/employees")}
                       >
                         <span className="flex items-center gap-2">
                           <Users className="h-4 w-4" /> View Employees ({employees.length})
@@ -784,20 +792,26 @@ function App() {
                     </CardContent>
                   </Card>
                 </div>
-              )}
+              }
+            />
 
-              {/* PROJECTS PAGE VIEW */}
-              {activeTab === "projects" && (
+            {/* PROJECTS PAGE VIEW */}
+            <Route
+              path="/projects"
+              element={
                 <ProjectsView
                   projects={projects}
                   setProjects={setProjects}
                   employees={employees}
                   currentUser={currentUser}
                 />
-              )}
+              }
+            />
 
-              {/* EMPLOYEES PAGE VIEW */}
-              {activeTab === "employees" && (
+            {/* EMPLOYEES PAGE VIEW */}
+            <Route
+              path="/employees"
+              element={
                 <div className="space-y-6 max-w-7xl mx-auto">
                   {/* Header Bar */}
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-6">
@@ -1011,7 +1025,10 @@ function App() {
                     </CardContent>
                   </Card>
                 </div>
-              )}
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
 
             </main>
           </div>
