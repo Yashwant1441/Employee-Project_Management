@@ -2,9 +2,11 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const Employee = require("./models/Employee");
 const User = require("./models/User");
 const Project = require("./models/Project");
+const { requireAuth, JWT_SECRET } = require("./middleware/auth");
 
 const app = express();
 app.use(
@@ -41,12 +43,10 @@ mongoose.connect(MONGO_URI)
         console.log(error);
     });
 
-app.get("/api/employees", async (req, res) => {
+// Employees API Routes (Protected by JWT requireAuth)
+app.get("/api/employees", requireAuth, async (req, res) => {
     try {
-        const { userId } = req.query;
-        if (!userId) {
-            return res.json([]);
-        }
+        const userId = req.userId;
         const employees = await Employee.find({ userId });
         res.json(employees);
     } catch (error) {
@@ -57,21 +57,42 @@ app.get("/api/employees", async (req, res) => {
     }
 });
 
-app.post("/api/employees", async (req, res) => {
+app.post("/api/employees", requireAuth, async (req, res) => {
     try {
-        const { employeeId, name, department, userId } = req.body;
+        let { employeeId, name, department } = req.body;
+        const userId = req.userId;
 
-        if (!employeeId || !name || !department || !userId) {
+        if (!name || !department) {
             return res.status(400).json({
-                message: "All fields (Employee ID, Name, Department, User ID) are required"
+                message: "Name and Department are required"
             });
+        }
+
+        const userEmployees = await Employee.find({ userId });
+
+        const getNextId = () => {
+            let maxNum = 0;
+            userEmployees.forEach((emp) => {
+                if (emp && emp.employeeId) {
+                    const match = String(emp.employeeId).match(/(\d+)/);
+                    if (match) {
+                        const num = parseInt(match[1], 10);
+                        if (!isNaN(num) && num > maxNum) {
+                            maxNum = num;
+                        }
+                    }
+                }
+            });
+            return `EMP-${String(maxNum + 1).padStart(3, "0")}`;
+        };
+
+        if (!employeeId) {
+            employeeId = getNextId();
         }
 
         const existingEmployee = await Employee.findOne({ employeeId, userId });
         if (existingEmployee) {
-            return res.status(400).json({
-                message: `Employee ID "${employeeId}" already exists for your account. Please enter a unique Employee ID.`
-            });
+            employeeId = getNextId();
         }
 
         const employee = await Employee.create({
@@ -89,32 +110,36 @@ app.post("/api/employees", async (req, res) => {
     }
 });
 
-app.delete("/api/employees/:id", async (req, res) => {
+app.delete("/api/employees/:id", requireAuth, async (req, res) => {
     try {
-        const employee = await Employee.findByIdAndDelete(req.params.id);
+        const employee = await Employee.findOneAndDelete({
+            _id: req.params.id,
+            userId: req.userId
+        });
         if (!employee) {
             return res.status(404).json({
-                message: "Employee not found",
-            })
+                message: "Employee not found or unauthorized",
+            });
         }
         res.json({
             message: "Employee deleted successfully",
             employee: employee
-        })
+        });
     } catch (error) {
         res.status(500).json({
             message: "Failed to Delete employee",
             error: error.message
-        })
+        });
     }
 });
 
-app.put("/api/employees/:id", async (req, res) => {
+app.put("/api/employees/:id", requireAuth, async (req, res) => {
     try {
         const { employeeId, name, department } = req.body;
 
         const existingEmployee = await Employee.findOne({
             employeeId,
+            userId: req.userId,
             _id: { $ne: req.params.id }
         });
         if (existingEmployee) {
@@ -123,8 +148,8 @@ app.put("/api/employees/:id", async (req, res) => {
             });
         }
 
-        const employee = await Employee.findByIdAndUpdate(
-            req.params.id,
+        const employee = await Employee.findOneAndUpdate(
+            { _id: req.params.id, userId: req.userId },
             { employeeId, name, department },
             {
                 new: true,
@@ -133,7 +158,7 @@ app.put("/api/employees/:id", async (req, res) => {
         );
         if (!employee) {
             return res.status(404).json({
-                message: "Employee not found"
+                message: "Employee not found or unauthorized"
             });
         }
         res.json(employee);
@@ -150,14 +175,13 @@ app.put("/api/employees/:id", async (req, res) => {
     }
 });
 
-// Projects API Routes
-app.get("/api/projects", async (req, res) => {
+// Projects API Routes (Protected by JWT requireAuth)
+app.get("/api/projects", requireAuth, async (req, res) => {
     try {
-        const { userId } = req.query;
-        if (!userId) {
-            return res.json([]);
-        }
-        const projects = await Project.find({ userId }).sort({ endDate: 1 });
+        const userId = req.userId;
+        const projects = await Project.find({ userId })
+            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status")
+            .sort({ endDate: 1 });
         res.json(projects);
     } catch (error) {
         res.status(500).json({
@@ -167,7 +191,25 @@ app.get("/api/projects", async (req, res) => {
     }
 });
 
-app.post("/api/projects", async (req, res) => {
+app.get("/api/projects/:id", requireAuth, async (req, res) => {
+    try {
+        const project = await Project.findOne({
+            _id: req.params.id,
+            userId: req.userId
+        });
+        if (!project) {
+            return res.status(404).json({ message: "Project not found" });
+        }
+        res.json(project);
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to fetch project details",
+            error: error.message
+        });
+    }
+});
+
+app.post("/api/projects", requireAuth, async (req, res) => {
     try {
         const {
             name,
@@ -183,13 +225,13 @@ app.post("/api/projects", async (req, res) => {
             extraRequirements,
             deploymentLocation,
             status,
-            version,
-            userId
+            version
         } = req.body;
+        const userId = req.userId;
 
-        if (!name || !clientName || !userId) {
+        if (!name || !clientName) {
             return res.status(400).json({
-                message: "Project Name, Client Name, and User ID are required."
+                message: "Project Name and Client Name are required."
             });
         }
 
@@ -224,7 +266,7 @@ app.post("/api/projects", async (req, res) => {
     }
 });
 
-app.put("/api/projects/:id", async (req, res) => {
+app.put("/api/projects/:id", requireAuth, async (req, res) => {
     try {
         const {
             name,
@@ -264,13 +306,14 @@ app.put("/api/projects/:id", async (req, res) => {
             version: version || "1.0.0"
         };
 
-        const project = await Project.findByIdAndUpdate(req.params.id, updateData, {
-            new: true,
-            runValidators: true
-        });
+        const project = await Project.findOneAndUpdate(
+            { _id: req.params.id, userId: req.userId },
+            updateData,
+            { new: true, runValidators: true }
+        );
 
         if (!project) {
-            return res.status(404).json({ message: "Project not found" });
+            return res.status(404).json({ message: "Project not found or unauthorized" });
         }
 
         res.json(project);
@@ -282,11 +325,14 @@ app.put("/api/projects/:id", async (req, res) => {
     }
 });
 
-app.delete("/api/projects/:id", async (req, res) => {
+app.delete("/api/projects/:id", requireAuth, async (req, res) => {
     try {
-        const project = await Project.findByIdAndDelete(req.params.id);
+        const project = await Project.findOneAndDelete({
+            _id: req.params.id,
+            userId: req.userId
+        });
         if (!project) {
-            return res.status(404).json({ message: "Project not found" });
+            return res.status(404).json({ message: "Project not found or unauthorized" });
         }
         res.json({ message: "Project deleted successfully", project });
     } catch (error) {
@@ -297,6 +343,7 @@ app.delete("/api/projects/:id", async (req, res) => {
     }
 });
 
+// Auth Routes (Login & Signup)
 app.post("/api/login", async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -323,8 +370,15 @@ app.post("/api/login", async (req, res) => {
             });
         }
 
+        const token = jwt.sign(
+            { userId: user._id.toString(), email: user.email },
+            JWT_SECRET,
+            { expiresIn: "7d" }
+        );
+
         res.json({
             message: "Login Successfully",
+            token,
             user: {
                 id: user._id.toString(),
                 email: user.email
@@ -361,8 +415,15 @@ app.post("/api/register", async (req, res) => {
             password: password
         });
 
+        const token = jwt.sign(
+            { userId: user._id.toString(), email: user.email },
+            JWT_SECRET,
+            { expiresIn: "7d" }
+        );
+
         res.status(201).json({
             message: "Account created successfully",
+            token,
             user: {
                 id: user._id.toString(),
                 email: user.email

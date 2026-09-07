@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import API_BASE_URL from "../api";
 import {
   Card,
@@ -145,6 +145,187 @@ const calculateWorkingHoursDetails = (startDateStr, endDateStr, hoursPerDay = 8)
   };
 };
 
+function MultiSelectDropdown({
+  label,
+  value = "",
+  onChange,
+  options = [],
+  placeholder = "Select items...",
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  const selectedItems = value
+    ? value.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const toggleItem = (item) => {
+    const trimmed = item.trim();
+    if (!trimmed) return;
+    let updated;
+    if (selectedItems.includes(trimmed)) {
+      updated = selectedItems.filter((i) => i !== trimmed);
+    } else {
+      updated = [...selectedItems, trimmed];
+    }
+    onChange(updated.join(", "));
+  };
+
+  const handleAddCustom = (e) => {
+    if (e.key === "Enter" || e.type === "click") {
+      e.preventDefault();
+      const customVal = searchQuery.trim();
+      if (customVal && !selectedItems.includes(customVal)) {
+        toggleItem(customVal);
+        setSearchQuery("");
+      }
+    }
+  };
+
+  const allAvailableOptions = Array.from(
+    new Set([...options, ...selectedItems])
+  );
+
+  const filteredOptions = allAvailableOptions.filter((opt) =>
+    opt.toLowerCase().includes(searchQuery.trim().toLowerCase())
+  );
+
+  const isExactMatch = allAvailableOptions.some(
+    (opt) => opt.toLowerCase() === searchQuery.trim().toLowerCase()
+  );
+
+  return (
+    <div className="grid gap-2">
+      <Label>{label}</Label>
+      <div className="relative" ref={dropdownRef}>
+        <div
+          onClick={() => setIsOpen(!isOpen)}
+          className="min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background flex flex-wrap items-center gap-1.5 cursor-pointer hover:border-ring transition-colors shadow-xs"
+        >
+          {selectedItems.length > 0 ? (
+            selectedItems.map((item, i) => (
+              <Badge
+                key={i}
+                variant="secondary"
+                className="flex items-center gap-1 px-2 py-0.5 text-xs bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20"
+              >
+                <span>{item}</span>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleItem(item);
+                  }}
+                  className="hover:text-destructive cursor-pointer ml-0.5 font-bold"
+                >
+                  ×
+                </span>
+              </Badge>
+            ))
+          ) : (
+            <span className="text-muted-foreground text-xs">{placeholder}</span>
+          )}
+          <div
+            className={`ml-auto pointer-events-none text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""
+              }`}
+          >
+            <ChevronDown className="h-4 w-4" />
+          </div>
+        </div>
+
+        {isOpen && (
+          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-xl flex flex-col">
+            <div className="p-2 border-b border-border bg-muted/30 flex gap-1.5">
+              <Input
+                type="text"
+                placeholder="Search or type custom value..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleAddCustom}
+                className="h-8 text-xs bg-background flex-1"
+                onClick={(e) => e.stopPropagation()}
+                autoFocus
+              />
+              {searchQuery.trim() && !isExactMatch && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="default"
+                  onClick={handleAddCustom}
+                  className="h-8 px-2.5 text-[11px] gap-1 shrink-0"
+                >
+                  <Plus className="h-3 w-3" /> Add
+                </Button>
+              )}
+            </div>
+
+            <div className="overflow-y-auto max-h-44 p-1 space-y-0.5">
+              {searchQuery.trim() && !isExactMatch && (
+                <div
+                  onClick={handleAddCustom}
+                  className="flex items-center gap-2 px-3 py-2 text-xs rounded-md cursor-pointer select-none bg-primary/10 text-primary font-semibold hover:bg-primary/20 transition-colors mb-1 border border-primary/20"
+                >
+                  <Plus className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  <span className="truncate">Add "{searchQuery.trim()}"</span>
+                </div>
+              )}
+
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((opt, idx) => {
+                  const isSelected = selectedItems.includes(opt);
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => toggleItem(opt)}
+                      className={`flex items-center justify-between px-3 py-2 text-xs rounded-md cursor-pointer select-none transition-colors ${isSelected
+                        ? "bg-primary/15 text-primary font-medium"
+                        : "hover:bg-accent hover:text-accent-foreground"
+                        }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => { }}
+                          className="rounded border-input text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer pointer-events-none"
+                        />
+                        <span>{opt}</span>
+                      </div>
+                      {isSelected && (
+                        <span className="text-primary text-xs font-bold">✓</span>
+                      )}
+                    </div>
+                  );
+                })
+              ) : !searchQuery.trim() ? (
+                <div className="p-3 text-xs text-muted-foreground text-center">
+                  No predefined options. Type to add custom value.
+                </div>
+              ) : null}
+            </div>
+
+            <div className="p-1.5 border-t border-border bg-muted/20 text-[11px] text-muted-foreground flex items-center justify-between px-3">
+              <span>Type custom name & press Enter or click Add</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ProjectsView({
   projects,
   setProjects,
@@ -159,6 +340,23 @@ export function ProjectsView({
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
   const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState(false);
+  const [employeeSearchQuery, setEmployeeSearchQuery] = useState("");
+  const employeeDropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        employeeDropdownRef.current &&
+        !employeeDropdownRef.current.contains(event.target)
+      ) {
+        setIsEmployeeDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -177,6 +375,73 @@ export function ProjectsView({
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [calculationDetails, setCalculationDetails] = useState(null);
+
+  // Dynamic options gathered from defaults + existing projects data
+  const dynamicClients = Array.from(
+    new Set([
+      "Apex Dynamics",
+      "Global Tech Systems",
+      "Nexus Solutions",
+      "Starlight Media",
+      "InnoCorp International",
+      "Vertex Logistics",
+      "Internal Project",
+      ...(projects || []).map((p) => p.clientName).filter(Boolean),
+    ])
+  );
+
+  const dynamicThemes = Array.from(
+    new Set([
+      "Dark Glassmorphism",
+      "Light Modern",
+      "Dark Mode",
+      "Corporate Blue",
+      "Minimal Slate",
+      "Cyberpunk Glow",
+      ...(projects || []).map((p) => p.theme).filter(Boolean),
+    ])
+  );
+
+  const dynamicDatabases = Array.from(
+    new Set([
+      "MongoDB",
+      "PostgreSQL",
+      "MySQL",
+      "Firebase Firestore",
+      "SQLite",
+      "Redis",
+      "Oracle DB",
+      ...(projects || []).map((p) => p.database).filter(Boolean),
+    ])
+  );
+
+  const dynamicLanguages = Array.from(
+    new Set([
+      "React & Node.js",
+      "Next.js & TypeScript",
+      "Vue.js & Express",
+      "Angular & Java Spring",
+      "Python & Django",
+      "Python & FastAPI",
+      "Flutter & Firebase",
+      "PHP & Laravel",
+      ...(projects || []).map((p) => p.language).filter(Boolean),
+    ])
+  );
+
+  const dynamicDeployments = Array.from(
+    new Set([
+      "Vercel",
+      "AWS (Amazon Web Services)",
+      "Azure Cloud",
+      "Google Cloud Platform (GCP)",
+      "Netlify",
+      "Render",
+      "DigitalOcean",
+      "On-Premise Server",
+      ...(projects || []).map((p) => p.deploymentLocation).filter(Boolean),
+    ])
+  );
 
   const ITEMS_PER_PAGE = 9;
 
@@ -239,28 +504,71 @@ export function ProjectsView({
     });
   };
 
-  const handleOpenEdit = (project) => {
+  const handleSelectProject = async (project) => {
+    if (!project) {
+      setSelectedProject(null);
+      return;
+    }
+    setSelectedProject(project);
+    const projId = project.id || project._id;
+    const token = localStorage.getItem("app_token");
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/projects/${projId}`, {
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.ok) {
+        const fullProj = await res.json();
+        setSelectedProject(fullProj);
+      }
+    } catch (err) {
+      console.log("Failed to fetch project details:", err);
+    }
+  };
+
+  const handleOpenEdit = async (project) => {
     setEditingProject(project);
-    const startStr = formatDateForInput(project.startDate);
-    const endStr = formatDateForInput(project.endDate);
+    let fullProject = project;
+
+    const projId = project.id || project._id;
+    const token = localStorage.getItem("app_token");
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/projects/${projId}`, {
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.ok) {
+        fullProject = await res.json();
+        setEditingProject(fullProject);
+      }
+    } catch (err) {
+      console.log("Failed to fetch project details for edit:", err);
+    }
+
+    const startStr = formatDateForInput(fullProject.startDate);
+    const endStr = formatDateForInput(fullProject.endDate);
     const details = calculateWorkingHoursDetails(startStr, endStr);
     setCalculationDetails(details);
 
     setFormData({
-      name: project.name || "",
-      clientName: project.clientName || "",
+      name: fullProject.name || "",
+      clientName: fullProject.clientName || "",
       startDate: startStr,
       endDate: endStr,
-      allottedHours: project.allottedHours || "",
-      assignedEmployees: Array.isArray(project.assignedEmployees)
-        ? project.assignedEmployees.join(", ")
-        : project.assignedEmployees || "",
-      theme: project.theme || "",
-      database: project.database || "",
-      language: project.language || "",
-      deploymentLocation: project.deploymentLocation || "",
-      status: project.status || "In Progress",
-      version: project.version || "1.0.0",
+      allottedHours: fullProject.allottedHours || "",
+      assignedEmployees: Array.isArray(fullProject.assignedEmployees)
+        ? fullProject.assignedEmployees.join(", ")
+        : fullProject.assignedEmployees || "",
+      theme: fullProject.theme || "",
+      database: fullProject.database || "",
+      language: fullProject.language || "",
+      deploymentLocation: fullProject.deploymentLocation || "",
+      status: fullProject.status || "In Progress",
+      version: fullProject.version || "1.0.0",
     });
     setFormError("");
     setShowFormModal(true);
@@ -311,12 +619,11 @@ export function ProjectsView({
         .filter(Boolean)
       : [];
 
-    const activeUserId = currentUser?.id || currentUser?._id;
-    if (!activeUserId) {
-      setFormError("User session invalid. Please log out and log in again.");
-      setIsSubmitting(false);
-      return;
-    }
+    const token = localStorage.getItem("app_token");
+    const authHeaders = {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
 
     const payload = {
       ...formData,
@@ -326,16 +633,15 @@ export function ProjectsView({
           ? Number(formData.employeeCount)
           : parsedAssigned.length || 1,
       assignedEmployees: parsedAssigned,
-      userId: activeUserId,
     };
 
     try {
       if (editingProject) {
         const res = await fetch(
-          `${API_BASE_URL}/api/projects/${editingProject._id}`,
+          `${API_BASE_URL}/api/projects/${editingProject.id || editingProject._id}`,
           {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders,
             body: JSON.stringify(payload),
           }
         );
@@ -346,15 +652,15 @@ export function ProjectsView({
           return;
         }
         setProjects((prev) =>
-          prev.map((p) => (p._id === data._id ? data : p))
+          prev.map((p) => ((p.id || p._id) === (data.id || data._id) ? data : p))
         );
-        if (selectedProject && selectedProject._id === data._id) {
+        if (selectedProject && (selectedProject.id || selectedProject._id) === (data.id || data._id)) {
           setSelectedProject(data);
         }
       } else {
         const res = await fetch(`${API_BASE_URL}/api/projects`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders,
           body: JSON.stringify(payload),
         });
         const data = await res.json();
@@ -376,14 +682,22 @@ export function ProjectsView({
 
   const handleDeleteProject = async () => {
     if (!deletingProject) return;
+    const token = localStorage.getItem("app_token");
     try {
       const res = await fetch(
-        `${API_BASE_URL}/api/projects/${deletingProject._id}`,
-        { method: "DELETE" }
+        `${API_BASE_URL}/api/projects/${deletingProject.id || deletingProject._id}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        }
       );
       if (res.ok) {
-        setProjects((prev) => prev.filter((p) => p._id !== deletingProject._id));
-        if (selectedProject && selectedProject._id === deletingProject._id) {
+        const delId = deletingProject.id || deletingProject._id;
+        setProjects((prev) => prev.filter((p) => (p.id || p._id) !== delId));
+        if (selectedProject && (selectedProject.id || selectedProject._id) === delId) {
           setSelectedProject(null);
         }
         setDeletingProject(null);
@@ -524,8 +838,8 @@ export function ProjectsView({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {paginatedProjects.map((project) => (
               <Card
-                key={project._id}
-                onClick={() => setSelectedProject(project)}
+                key={project.id || project._id}
+                onClick={() => handleSelectProject(project)}
                 className="group relative cursor-pointer overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:border-primary/50 border border-border bg-card flex flex-col justify-between"
               >
                 <CardHeader className="p-6">
@@ -626,7 +940,7 @@ export function ProjectsView({
             return (
               <>
                 <SheetHeader className="border-b border-border pb-4">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 justify-start">
                     <Badge variant="outline" className="text-xs font-mono">
                       v{selectedProject.version || "1.0.0"}
                     </Badge>
@@ -766,17 +1080,15 @@ export function ProjectsView({
                 />
               </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="clientName">Client Name *</Label>
-                <Input
-                  id="clientName"
-                  name="clientName"
-                  placeholder="e.g. Apex Dynamics"
-                  value={formData.clientName}
-                  onChange={handleFormChange}
-                  required
-                />
-              </div>
+              <MultiSelectDropdown
+                label="Client Name *"
+                value={formData.clientName}
+                options={dynamicClients}
+                placeholder="Select or add clients..."
+                onChange={(val) =>
+                  setFormData((prev) => ({ ...prev, clientName: val }))
+                }
+              />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -825,10 +1137,10 @@ export function ProjectsView({
                   onChange={handleFormChange}
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
-                  <option value="In Progress">⚡ In Progress</option>
-                  <option value="Pending">⏱ Pending</option>
-                  <option value="Completed">✓ Completed</option>
-                  <option value="Delayed">⚠ Delayed</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Delayed">Delayed</option>
                 </select>
               </div>
             </div>
@@ -852,15 +1164,39 @@ export function ProjectsView({
                 }));
               };
 
+              const selectAllEmployees = () => {
+                const allNames = employees.map((e) => e.name);
+                setFormData((prev) => ({
+                  ...prev,
+                  assignedEmployees: allNames.join(", "),
+                }));
+              };
+
+              const clearAllEmployees = () => {
+                setFormData((prev) => ({
+                  ...prev,
+                  assignedEmployees: "",
+                }));
+              };
+
+              const filteredEmpList = employees.filter((emp) => {
+                const q = employeeSearchQuery.trim().toLowerCase();
+                if (!q) return true;
+                const nameMatch = emp.name && emp.name.toLowerCase().includes(q);
+                const idMatch = emp.employeeId && emp.employeeId.toLowerCase().includes(q);
+                const deptMatch = emp.department && emp.department.toLowerCase().includes(q);
+                return nameMatch || idMatch || deptMatch;
+              });
+
               return (
                 <div className="grid gap-2">
                   <Label htmlFor="assignedEmployees">
-                    Assigned Employees (Multi-select)
+                    Assigned Employees (Multi-Select)
                   </Label>
-                  <div className="relative">
+                  <div className="relative" ref={employeeDropdownRef}>
                     <div
                       onClick={() => setIsEmployeeDropdownOpen(!isEmployeeDropdownOpen)}
-                      className="min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background flex flex-wrap items-center gap-1.5 cursor-pointer hover:border-ring transition-colors"
+                      className="min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background flex flex-wrap items-center gap-1.5 cursor-pointer hover:border-ring transition-colors shadow-xs"
                     >
                       {selectedNames.length > 0 ? (
                         selectedNames.map((empName, i) => (
@@ -886,36 +1222,91 @@ export function ProjectsView({
                           Select employees...
                         </span>
                       )}
-                      <div className="ml-auto pointer-events-none text-muted-foreground">
+                      <div className={`ml-auto pointer-events-none text-muted-foreground transition-transform duration-200 ${isEmployeeDropdownOpen ? "rotate-180" : ""}`}>
                         <ChevronDown className="h-4 w-4" />
                       </div>
                     </div>
 
                     {isEmployeeDropdownOpen && (
-                      <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-1">
-                        {employees.length > 0 ? (
-                          employees.map((emp) => {
-                            const isSelected = selectedNames.includes(emp.name);
-                            return (
-                              <div
-                                key={emp._id || emp.employeeId}
-                                onClick={() => toggleEmployee(emp.name)}
-                                className={`flex items-center justify-between px-3 py-2 text-xs rounded-sm cursor-pointer select-none transition-colors ${
-                                  isSelected
-                                    ? "bg-primary/15 text-primary font-semibold"
-                                    : "hover:bg-accent hover:text-accent-foreground"
-                                }`}
+                      <div className="absolute z-50 mt-1 max-h-64 w-full overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-xl flex flex-col">
+                        {/* Search and Action Buttons Bar */}
+                        <div className="p-2 border-b border-border bg-muted/30 flex flex-col gap-2">
+                          <Input
+                            type="text"
+                            placeholder="Filter employees..."
+                            value={employeeSearchQuery}
+                            onChange={(e) => setEmployeeSearchQuery(e.target.value)}
+                            className="h-8 text-xs bg-background"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div className="flex items-center justify-between text-[11px] px-1 text-muted-foreground">
+                            <span>Selected: {selectedNames.length} of {employees.length}</span>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectAllEmployees();
+                                }}
+                                className="text-primary hover:underline font-medium"
                               >
-                                <span>{emp.name}</span>
-                                {isSelected && <span className="text-primary text-xs">✓</span>}
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <div className="p-3 text-xs text-muted-foreground text-center">
-                            No employees found.
+                                Select All
+                              </button>
+                              <span>|</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  clearAllEmployees();
+                                }}
+                                className="text-destructive hover:underline font-medium"
+                              >
+                                Clear All
+                              </button>
+                            </div>
                           </div>
-                        )}
+                        </div>
+
+                        {/* Employees Checklist */}
+                        <div className="overflow-y-auto max-h-44 p-1 space-y-0.5">
+                          {filteredEmpList.length > 0 ? (
+                            filteredEmpList.map((emp) => {
+                              const isSelected = selectedNames.includes(emp.name);
+                              return (
+                                <div
+                                  key={emp.id || emp._id || emp.employeeId}
+                                  onClick={() => toggleEmployee(emp.name)}
+                                  className={`flex items-center justify-between px-3 py-2 text-xs rounded-md cursor-pointer select-none transition-colors ${isSelected
+                                    ? "bg-primary/15 text-primary font-medium"
+                                    : "hover:bg-accent hover:text-accent-foreground"
+                                    }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => { }} // Controlled by div click
+                                      className="rounded border-input text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer pointer-events-none"
+                                    />
+                                    <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0">
+                                      {emp.employeeId || "EMP"}
+                                    </Badge>
+                                    <span className="font-medium">{emp.name}</span>
+                                  </div>
+                                  {emp.department && (
+                                    <Badge variant="secondary" className="text-[10px] opacity-80">
+                                      {emp.department}
+                                    </Badge>
+                                  )}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="p-4 text-xs text-muted-foreground text-center">
+                              No employees found matching filter.
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -924,51 +1315,47 @@ export function ProjectsView({
             })()}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="theme">Theme to Use</Label>
-                <Input
-                  id="theme"
-                  name="theme"
-                  placeholder="e.g. Dark Glassmorphism"
-                  value={formData.theme}
-                  onChange={handleFormChange}
-                />
-              </div>
+              <MultiSelectDropdown
+                label="Theme to Use"
+                value={formData.theme}
+                options={dynamicThemes}
+                // placeholder="Select or add themes..."
+                onChange={(val) =>
+                  setFormData((prev) => ({ ...prev, theme: val }))
+                }
+              />
 
-              <div className="grid gap-2">
-                <Label htmlFor="database">Database Used</Label>
-                <Input
-                  id="database"
-                  name="database"
-                  placeholder="e.g. MongoDB / PostgreSQL"
-                  value={formData.database}
-                  onChange={handleFormChange}
-                />
-              </div>
+              <MultiSelectDropdown
+                label="Database Used"
+                value={formData.database}
+                options={dynamicDatabases}
+                // placeholder="Select or add databases..."
+                onChange={(val) =>
+                  setFormData((prev) => ({ ...prev, database: val }))
+                }
+              />
 
-              <div className="grid gap-2">
-                <Label htmlFor="language">Language / Tech Stack</Label>
-                <Input
-                  id="language"
-                  name="language"
-                  placeholder="e.g. React & Node.js"
-                  value={formData.language}
-                  onChange={handleFormChange}
-                />
-              </div>
+              <MultiSelectDropdown
+                label="Language / Tech Stack"
+                value={formData.language}
+                options={dynamicLanguages}
+                // placeholder="Select or add tech stack..."
+                onChange={(val) =>
+                  setFormData((prev) => ({ ...prev, language: val }))
+                }
+              />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="deploymentLocation">Where Deployed?</Label>
-                <Input
-                  id="deploymentLocation"
-                  name="deploymentLocation"
-                  placeholder="e.g. Azure Cloud / AWS / Vercel"
-                  value={formData.deploymentLocation}
-                  onChange={handleFormChange}
-                />
-              </div>
+              <MultiSelectDropdown
+                label="Where Deployed?"
+                value={formData.deploymentLocation}
+                options={dynamicDeployments}
+                // placeholder="Select or add deployment locations..."
+                onChange={(val) =>
+                  setFormData((prev) => ({ ...prev, deploymentLocation: val }))
+                }
+              />
 
               <div className="grid gap-2">
                 <Label htmlFor="version">Project Version</Label>

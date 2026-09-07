@@ -68,6 +68,19 @@ const projectSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+projectSchema.set("toJSON", {
+  transform: (doc, ret) => {
+    ret.id = ret._id ? ret._id.toString() : ret.id;
+    delete ret._id;
+    delete ret.userId;
+    delete ret.__v;
+    delete ret.createdAt;
+    delete ret.updatedAt;
+    delete ret.version;
+    return ret;
+  }
+});
+
 const Project = mongoose.model("Project", projectSchema);
 
 module.exports = Project;

@@ -1,6 +1,7 @@
 import "./App.css";
 import API_BASE_URL from "./api";
 import { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -75,6 +76,22 @@ import {
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { ProjectsView } from "@/components/ProjectsView";
+const generateNextEmployeeId = (employeesList = []) => {
+  let maxNum = 0;
+  (employeesList || []).forEach((emp) => {
+    if (emp && emp.employeeId) {
+      const match = String(emp.employeeId).match(/(\d+)/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num;
+        }
+      }
+    }
+  });
+  const nextNum = maxNum + 1;
+  return `EMP-${String(nextNum).padStart(3, "0")}`;
+};
 
 function App() {
   const [email, setEmail] = useState("");
@@ -118,16 +135,52 @@ function App() {
     code: "APEX-ORG",
   };
 
-  const ITEMS_PER_PAGE = 5;
-  const filteredEmployees = employees.filter((employee) =>
-    employee.name ? employee.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) : false
-  );
+  const [itemsPerPage, setItemsPerPage] = useState(5);
 
-  const totalPages = Math.ceil(filteredEmployees.length / ITEMS_PER_PAGE) || 1;
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const isEmployeeAssigned = (project, employee) => {
+    if (!project || !employee) return false;
+    const assignedList = Array.isArray(project.assignedEmployees)
+      ? project.assignedEmployees
+      : typeof project.assignedEmployees === "string"
+        ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
+
+    const empNameLower = (employee.name || "").trim().toLowerCase();
+    const empIdLower = (employee.employeeId || "").trim().toLowerCase();
+
+    return assignedList.some((n) => {
+      const nLower = (n || "").trim().toLowerCase();
+      if (!nLower) return false;
+      return (
+        nLower === empNameLower ||
+        nLower === empIdLower ||
+        (empNameLower && (nLower.includes(empNameLower) || empNameLower.includes(nLower)))
+      );
+    });
+  };
+
+  const filteredEmployees = employees.filter((employee) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+
+    const nameMatch = employee.name && employee.name.toLowerCase().includes(q);
+    const idMatch = employee.employeeId && employee.employeeId.toLowerCase().includes(q);
+
+    const assignedProjects = projects.filter((proj) => isEmployeeAssigned(proj, employee));
+    const projectMatch = assignedProjects.some((proj) => {
+      const projNameMatch = proj.name && proj.name.toLowerCase().includes(q);
+      const projIdMatch = (proj.projectId || proj.id || proj._id || "").toString().toLowerCase().includes(q);
+      return projNameMatch || projIdMatch;
+    });
+
+    return nameMatch || idMatch || projectMatch;
+  });
+
+  const totalPages = Math.ceil(filteredEmployees.length / itemsPerPage) || 1;
+  const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedEmployees = filteredEmployees.slice(
     startIndex,
-    startIndex + ITEMS_PER_PAGE
+    startIndex + itemsPerPage
   );
 
   useEffect(() => {
@@ -135,18 +188,17 @@ function App() {
       return;
     }
 
-    const userId = currentUser?.id || currentUser?._id;
-    if (!userId) {
-      setEmployees([]);
-      setProjects([]);
-      return;
-    }
-
-    const userQuery = `?userId=${userId}`;
+    const token = localStorage.getItem("app_token");
+    const authHeaders = {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
 
     const fetchEmployees = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/employees${userQuery}`);
+        const response = await fetch(`${API_BASE_URL}/api/employees`, {
+          headers: authHeaders,
+        });
         const data = await response.json();
         setEmployees(Array.isArray(data) ? data : []);
       } catch (error) {
@@ -156,7 +208,9 @@ function App() {
 
     const fetchProjects = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/projects${userQuery}`);
+        const response = await fetch(`${API_BASE_URL}/api/projects`, {
+          headers: authHeaders,
+        });
         const data = await response.json();
         if (Array.isArray(data)) {
           setProjects(data);
@@ -199,6 +253,9 @@ function App() {
         };
         setCurrentUser(userObj);
         try {
+          if (data.token) {
+            localStorage.setItem("app_token", data.token);
+          }
           localStorage.setItem("app_user", JSON.stringify(userObj));
         } catch (e) { }
 
@@ -222,6 +279,7 @@ function App() {
     setIsLoggedIn(false);
     setCurrentUser(null);
     try {
+      localStorage.removeItem("app_token");
       localStorage.removeItem("app_user");
     } catch (e) { }
     setEmail("");
@@ -234,22 +292,19 @@ function App() {
 
   const handleAddEmployee = async () => {
     setFormError("");
-    const activeUserId = currentUser?.id || currentUser?._id;
-    if (!activeUserId) {
-      setFormError("User session invalid. Please log out and log in again.");
-      return;
-    }
+    const token = localStorage.getItem("app_token");
+    const finalEmployeeId = employeeId || generateNextEmployeeId(employees);
     try {
       const response = await fetch(`${API_BASE_URL}/api/employees`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          employeeId,
+          employeeId: finalEmployeeId,
           name,
           department,
-          userId: activeUserId,
         }),
       });
 
@@ -273,14 +328,19 @@ function App() {
   };
 
   const handleDeleteEmployee = async (id) => {
-    const targetId = id || deletingEmployee?._id;
+    const targetId = id || deletingEmployee?.id || deletingEmployee?._id;
     if (!targetId) return;
 
+    const token = localStorage.getItem("app_token");
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/employees/${targetId}`,
         {
           method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
         }
       );
 
@@ -292,7 +352,7 @@ function App() {
       }
 
       setEmployees((previousEmployees) =>
-        previousEmployees.filter((employee) => employee._id !== targetId)
+        previousEmployees.filter((employee) => (employee.id || employee._id) !== targetId)
       );
 
       setDeletingEmployee(null);
@@ -312,13 +372,15 @@ function App() {
 
   const handleUpdateEmployee = async () => {
     setFormError("");
+    const token = localStorage.getItem("app_token");
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/employees/${editingEmployee._id}`,
+        `${API_BASE_URL}/api/employees/${editingEmployee.id || editingEmployee._id}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({
             employeeId,
@@ -337,7 +399,7 @@ function App() {
 
       setEmployees((previousEmployees) =>
         previousEmployees.map((employee) =>
-          employee._id === data._id ? data : employee
+          (employee.id || employee._id) === (data.id || data._id) ? data : employee
         )
       );
 
@@ -355,33 +417,11 @@ function App() {
 
   const handleOpenAddModal = () => {
     setEditingEmployee(null);
-    setEmployeeId("");
+    setEmployeeId(generateNextEmployeeId(employees));
     setName("");
     setDepartment("");
     setFormError("");
     setShowAddForm(true);
-  };
-
-  const isEmployeeAssigned = (project, employee) => {
-    if (!project || !employee) return false;
-    const assignedList = Array.isArray(project.assignedEmployees)
-      ? project.assignedEmployees
-      : typeof project.assignedEmployees === "string"
-        ? project.assignedEmployees.split(",").map((s) => s.trim()).filter(Boolean)
-        : [];
-
-    const empNameLower = (employee.name || "").trim().toLowerCase();
-    const empIdLower = (employee.employeeId || "").trim().toLowerCase();
-
-    return assignedList.some((n) => {
-      const nLower = (n || "").trim().toLowerCase();
-      if (!nLower) return false;
-      return (
-        nLower === empNameLower ||
-        nLower === empIdLower ||
-        (empNameLower && (nLower.includes(empNameLower) || empNameLower.includes(nLower)))
-      );
-    });
   };
 
   const handleToggleProjectAssignment = async (project, employee) => {
@@ -433,19 +473,23 @@ function App() {
       deploymentLocation: project.deploymentLocation,
     };
 
+    const token = localStorage.getItem("app_token");
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/projects/${project._id}`,
+        `${API_BASE_URL}/api/projects/${project.id || project._id}`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify(payload),
         }
       );
       const data = await response.json();
       if (response.ok) {
         setProjects((prevProjects) =>
-          prevProjects.map((p) => (p._id === data._id ? data : p))
+          prevProjects.map((p) => ((p.id || p._id) === (data.id || data._id) ? data : p))
         );
       } else {
         console.error("Failed to update project assignment:", data.message);
@@ -536,14 +580,14 @@ function App() {
                 </div>
                 <ModeToggle />
               </div>
-              <Button
+              {/* <Button
                 variant="outline"
                 size="sm"
                 className="w-full justify-start text-xs text-muted-foreground hover:text-destructive"
                 onClick={handleLogout}
               >
                 <LogOut className="mr-2 h-3.5 w-3.5" /> Logout
-              </Button>
+              </Button> */}
             </SidebarFooter>
           </Sidebar>
 
@@ -786,7 +830,7 @@ function App() {
                           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                           <Input
                             type="text"
-                            placeholder="Search by name..."
+                            placeholder="Search by name, ID, or project..."
                             value={searchQuery}
                             onChange={(e) => {
                               setSearchQuery(e.target.value);
@@ -809,7 +853,7 @@ function App() {
                           </h3>
                           <p className="text-sm text-muted-foreground max-w-sm mt-1 mb-4">
                             {searchQuery
-                              ? `No employee names match "${searchQuery}".`
+                              ? `No employee names, IDs, or assigned projects match "${searchQuery}".`
                               : "Get started by adding a new employee to your organization directory."}
                           </p>
                           {searchQuery ? (
@@ -841,7 +885,7 @@ function App() {
                                 );
 
                                 return (
-                                  <TableRow key={employee._id}>
+                                  <TableRow key={employee.id || employee._id}>
                                     <TableCell className="font-mono">
                                       <Badge variant="outline">{employee.employeeId}</Badge>
                                     </TableCell>
@@ -855,7 +899,7 @@ function App() {
                                       <div className="flex flex-wrap items-center gap-1.5">
                                         {employeeProjects.slice(0, 2).map((proj) => (
                                           <Badge
-                                            key={proj._id}
+                                            key={proj.id || proj._id}
                                             variant="outline"
                                             className="text-[11px] bg-primary/5 text-primary border-primary/20 font-normal"
                                           >
@@ -908,8 +952,27 @@ function App() {
 
                           {/* Pagination Controls */}
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-4 mt-4">
-                            <div className="text-xs text-muted-foreground">
-                              Showing {startIndex + 1}-{Math.min(startIndex + ITEMS_PER_PAGE, filteredEmployees.length)} of {filteredEmployees.length} employees
+                            <div className="flex flex-wrap items-center gap-4">
+                              <div className="text-xs text-muted-foreground">
+                                Showing {filteredEmployees.length === 0 ? 0 : startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredEmployees.length)} of {filteredEmployees.length} employees
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground border-l border-border pl-4">
+                                <span>Rows per page:</span>
+                                <select
+                                  value={itemsPerPage}
+                                  onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                  }}
+                                  className="bg-background border border-input rounded-md px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer shadow-xs"
+                                >
+                                  {[5, 6, 7, 8, 9, 10].map((num) => (
+                                    <option key={num} value={num}>
+                                      {num}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
                             {totalPages > 1 && (
                               <Pagination className="w-auto mx-0">
@@ -976,12 +1039,16 @@ function App() {
 
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="employeeId">Employee ID</Label>
+                <Label htmlFor="employeeId">
+                  Employee ID <span className="text-xs text-muted-foreground font-normal">(Auto-generated)</span>
+                </Label>
                 <Input
                   id="employeeId"
                   placeholder="e.g. EMP-001"
                   value={employeeId}
-                  onChange={(e) => setEmployeeId(e.target.value)}
+                  disabled
+                  readOnly
+                  className="bg-muted text-muted-foreground cursor-not-allowed"
                 />
               </div>
               <div className="grid gap-2">
@@ -1026,14 +1093,14 @@ function App() {
             <DialogHeader>
               <DialogTitle>Are you absolutely sure?</DialogTitle>
               <DialogDescription className="pt-1">
-                This action cannot be undone. This will permanently delete employee{" "}
+                This action cannot be undone. This will permanently delete employee with ID {" "}
                 <span className="font-semibold text-foreground">
                   {deletingEmployee?.employeeId} ({deletingEmployee?.name})
                 </span>{" "}
                 from your database.
               </DialogDescription>
             </DialogHeader>
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="gap-2 sm:gap-1">
               <Button variant="outline" onClick={() => setDeletingEmployee(null)}>
                 Cancel
               </Button>
@@ -1096,7 +1163,7 @@ function App() {
 
                   return (
                     <div
-                      key={project._id}
+                      key={project.id || project._id}
                       className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${isAssigned
                         ? "bg-primary/5 border-primary/30"
                         : "bg-card border-border hover:border-primary/20"
