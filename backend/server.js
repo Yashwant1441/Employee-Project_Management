@@ -28,6 +28,20 @@ app.get("/", (req, res) => {
     res.send("Employee Management Backend API is running successfully!");
 });
 
+app.get("/health", (req, res) => {
+    res.status(200).json({ status: "ok", message: "Server is active", timestamp: new Date() });
+});
+
+// Self-ping to prevent Render free tier from going to sleep (every 10 minutes)
+const RENDER_BACKEND_URL = process.env.RENDER_EXTERNAL_URL || "https://employee-project-management-8wu8.onrender.com";
+setInterval(() => {
+    fetch(`${RENDER_BACKEND_URL}/health`)
+        .then((r) => r.json())
+        .then((data) => console.log("Keep-alive ping successful:", data.status))
+        .catch((err) => console.log("Keep-alive ping failed:", err.message));
+}, 10 * 60 * 1000);
+
+
 mongoose.connect(MONGO_URI)
     .then(async () => {
         console.log("MongoDB connected");
