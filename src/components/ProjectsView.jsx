@@ -70,37 +70,53 @@ import {
   Upload,
   Loader2,
   Check,
+  Bot,
+  Sparkles,
+  GitBranch,
+  Flame,
+  Workflow,
 } from "lucide-react";
 
 const PROJECT_ICON_PRESETS = [
-  { key: "briefcase", label: "Briefcase", icon: Briefcase },
-  { key: "rocket", label: "Rocket", icon: Rocket },
-  { key: "code", label: "Code", icon: Code2 },
-  { key: "globe", label: "Globe", icon: Globe },
-  { key: "mobile", label: "Mobile", icon: Smartphone },
-  { key: "database", label: "Database", icon: Database },
-  { key: "cloud", label: "Cloud", icon: Cloud },
-  { key: "palette", label: "Design", icon: Palette },
-  { key: "shield", label: "Security", icon: Shield },
-  { key: "zap", label: "Speed", icon: Zap },
-  { key: "package", label: "Product", icon: Package },
-  { key: "settings", label: "Settings", icon: Settings },
-  { key: "terminal", label: "Terminal", icon: Terminal },
-  { key: "cpu", label: "Hardware/AI", icon: Cpu },
-  { key: "folder", label: "Folder", icon: Folder },
+  { key: "briefcase", label: "Briefcase", icon: Briefcase, color: "text-blue-500" },
+  { key: "rocket", label: "Rocket", icon: Rocket, color: "text-amber-500" },
+  { key: "bot", label: "AI / Bot", icon: Bot, color: "text-emerald-500" },
+  { key: "code", label: "Code", icon: Code2, color: "text-indigo-500" },
+  { key: "sparkles", label: "Innovation", icon: Sparkles, color: "text-purple-500" },
+  { key: "globe", label: "Web", icon: Globe, color: "text-sky-500" },
+  { key: "mobile", label: "Mobile", icon: Smartphone, color: "text-rose-500" },
+  { key: "database", label: "Database", icon: Database, color: "text-cyan-500" },
+  { key: "server", label: "Backend", icon: Server, color: "text-teal-500" },
+  { key: "cloud", label: "Cloud", icon: Cloud, color: "text-blue-400" },
+  { key: "git", label: "DevOps / Git", icon: GitBranch, color: "text-orange-500" },
+  { key: "workflow", label: "Pipelines", icon: Workflow, color: "text-violet-500" },
+  { key: "flame", label: "Priority", icon: Flame, color: "text-red-500" },
+  { key: "shield", label: "Security", icon: Shield, color: "text-green-500" },
+  { key: "zap", label: "Fast / API", icon: Zap, color: "text-yellow-500" },
+  { key: "palette", label: "Design", icon: Palette, color: "text-pink-500" },
+  { key: "package", label: "Product", icon: Package, color: "text-amber-600" },
+  { key: "terminal", label: "CLI / System", icon: Terminal, color: "text-emerald-400" },
+  { key: "layers", label: "Architecture", icon: Layers, color: "text-fuchsia-500" },
+  { key: "cpu", label: "Hardware / Core", icon: Cpu, color: "text-blue-600" },
+  { key: "folder", label: "General", icon: Folder, color: "text-slate-500" },
 ];
 
 const renderProjectIcon = (iconStr, className = "h-5 w-5") => {
   if (!iconStr) return <Briefcase className={className} />;
   
-  if (iconStr.startsWith("data:") || iconStr.startsWith("http://") || iconStr.startsWith("https://")) {
+  if (
+    iconStr.startsWith("data:") ||
+    iconStr.startsWith("http://") ||
+    iconStr.startsWith("https://") ||
+    iconStr.startsWith("/avatars/")
+  ) {
     return <img src={iconStr} alt="Project Icon" className={`${className} object-cover rounded-md`} />;
   }
 
   const preset = PROJECT_ICON_PRESETS.find((p) => p.key === iconStr);
   if (preset) {
     const IconComp = preset.icon;
-    return <IconComp className={className} />;
+    return <IconComp className={`${className} ${preset.color || ""}`} />;
   }
 
   return <Briefcase className={className} />;
@@ -1271,10 +1287,10 @@ export function ProjectsView({
                         key={preset.key}
                         type="button"
                         onClick={() => setFormData((prev) => ({ ...prev, icon: preset.key }))}
-                        className={`h-9 w-9 rounded-lg flex items-center justify-center border transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary ring-2 ring-primary/30 scale-105" : "bg-card hover:bg-accent border-border text-muted-foreground hover:text-foreground"}`}
+                        className={`h-9 w-9 rounded-lg flex items-center justify-center border transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary ring-2 ring-primary/30 scale-105" : "bg-card hover:bg-accent border-border hover:scale-105"}`}
                         title={preset.label}
                       >
-                        <IconComp className="h-4 w-4" />
+                        <IconComp className={`h-4 w-4 ${isSelected ? "text-primary-foreground" : preset.color || "text-foreground"}`} />
                       </button>
                     );
                   })}
