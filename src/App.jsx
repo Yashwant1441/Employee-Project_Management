@@ -602,7 +602,7 @@ function App() {
                       onClick={() => navigate("/")}
                     >
                       <Home className="h-4 w-4" />
-                      <span className="flex-1">Home</span>
+                      <span className="flex">Home</span>
                       <Badge variant="outline" className="text-[10px] py-0 h-4">
                         Main
                       </Badge>
@@ -615,7 +615,7 @@ function App() {
                       onClick={() => navigate("/employees")}
                     >
                       <Users className="h-4 w-4" />
-                      <span className="flex-1">Employees</span>
+                      <span className="flex">Employees</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono">
                         {employees.length}
                       </Badge>
@@ -628,7 +628,7 @@ function App() {
                       onClick={() => navigate("/projects")}
                     >
                       <Briefcase className="h-4 w-4" />
-                      <span className="flex-1">Projects</span>
+                      <span className="flex">Projects</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono">
                         {projects.length}
                       </Badge>
@@ -651,14 +651,6 @@ function App() {
                 </div>
                 <ModeToggle />
               </div>
-              {/* <Button
-                variant="outline"
-                size="sm"
-                className="w-full justify-start text-xs text-muted-foreground hover:text-destructive"
-                onClick={handleLogout}
-              >
-                <LogOut className="mr-2 h-3.5 w-3.5" /> Logout
-              </Button> */}
             </SidebarFooter>
           </Sidebar>
 
@@ -683,11 +675,6 @@ function App() {
               </div>
 
               <div className="flex items-center gap-3">
-                {activeTab === "employees" && (
-                  <Button onClick={handleOpenAddModal} size="sm">
-                    <Plus className="mr-2 h-4 w-4" /> Add Employee
-                  </Button>
-                )}
                 <Button variant="outline" size="sm" onClick={handleLogout} className="hidden sm:flex">
                   <LogOut className="mr-2 h-4 w-4" /> Logout
                 </Button>
