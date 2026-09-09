@@ -57,7 +57,54 @@ import {
   Layers,
   ChevronRight,
   ChevronDown,
+  Rocket,
+  Smartphone,
+  Globe,
+  Shield,
+  Zap,
+  Settings,
+  Package,
+  Terminal,
+  Cpu,
+  Folder,
+  Upload,
+  Loader2,
+  Check,
 } from "lucide-react";
+
+const PROJECT_ICON_PRESETS = [
+  { key: "briefcase", label: "Briefcase", icon: Briefcase },
+  { key: "rocket", label: "Rocket", icon: Rocket },
+  { key: "code", label: "Code", icon: Code2 },
+  { key: "globe", label: "Globe", icon: Globe },
+  { key: "mobile", label: "Mobile", icon: Smartphone },
+  { key: "database", label: "Database", icon: Database },
+  { key: "cloud", label: "Cloud", icon: Cloud },
+  { key: "palette", label: "Design", icon: Palette },
+  { key: "shield", label: "Security", icon: Shield },
+  { key: "zap", label: "Speed", icon: Zap },
+  { key: "package", label: "Product", icon: Package },
+  { key: "settings", label: "Settings", icon: Settings },
+  { key: "terminal", label: "Terminal", icon: Terminal },
+  { key: "cpu", label: "Hardware/AI", icon: Cpu },
+  { key: "folder", label: "Folder", icon: Folder },
+];
+
+const renderProjectIcon = (iconStr, className = "h-5 w-5") => {
+  if (!iconStr) return <Briefcase className={className} />;
+  
+  if (iconStr.startsWith("data:") || iconStr.startsWith("http://") || iconStr.startsWith("https://")) {
+    return <img src={iconStr} alt="Project Icon" className={`${className} object-cover rounded-md`} />;
+  }
+
+  const preset = PROJECT_ICON_PRESETS.find((p) => p.key === iconStr);
+  if (preset) {
+    const IconComp = preset.icon;
+    return <IconComp className={className} />;
+  }
+
+  return <Briefcase className={className} />;
+};
 
 // Standard Public Holidays list (YYYY-MM-DD format)
 const PUBLIC_HOLIDAYS = [
@@ -365,6 +412,7 @@ export function ProjectsView({
     endDate: "",
     allottedHours: "",
     assignedEmployees: "",
+    icon: "",
     theme: "",
     database: "",
     language: "",
@@ -374,6 +422,7 @@ export function ProjectsView({
   });
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploadingIcon, setIsUploadingIcon] = useState(false);
   const [calculationDetails, setCalculationDetails] = useState(null);
 
   // Dynamic options gathered from defaults + existing projects data
@@ -475,6 +524,7 @@ export function ProjectsView({
       endDate: "",
       allottedHours: "",
       assignedEmployees: "",
+      icon: "",
       theme: "",
       database: "",
       language: "",
@@ -563,6 +613,7 @@ export function ProjectsView({
       assignedEmployees: Array.isArray(fullProject.assignedEmployees)
         ? fullProject.assignedEmployees.join(", ")
         : fullProject.assignedEmployees || "",
+      icon: fullProject.icon || "",
       theme: fullProject.theme || "",
       database: fullProject.database || "",
       language: fullProject.language || "",
@@ -600,6 +651,49 @@ export function ProjectsView({
 
       return nextForm;
     });
+  };
+
+  const handleIconFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setFormError("Project icon size should be less than 5MB.");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setFormData((prev) => ({ ...prev, icon: previewUrl }));
+    setIsUploadingIcon(true);
+    setFormError("");
+
+    try {
+      const token = localStorage.getItem("app_token");
+      const uploadData = new FormData();
+      uploadData.append("icon", file);
+
+      const res = await fetch(`${API_BASE_URL}/api/upload/icon`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: uploadData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setFormError(data.message || "Failed to upload project icon to Cloudinary.");
+        setFormData((prev) => ({ ...prev, icon: editingProject?.icon || "" }));
+      } else if (data.url) {
+        setFormData((prev) => ({ ...prev, icon: data.url }));
+      }
+    } catch (err) {
+      console.error("Project icon upload failed:", err);
+      setFormError("Network error while uploading project icon to Cloudinary.");
+      setFormData((prev) => ({ ...prev, icon: editingProject?.icon || "" }));
+    } finally {
+      setIsUploadingIcon(false);
+    }
   };
 
   const handleSubmitForm = async (e) => {
@@ -845,8 +939,8 @@ export function ProjectsView({
               >
                 <CardHeader className="p-6">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="h-10 w-10 shrink-0 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold border border-primary/20 group-hover:bg-primary group-hover:text-primary-foreground transition-all">
-                      <Briefcase className="h-5 w-5" />
+                    <div className="h-10 w-10 shrink-0 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold border border-primary/20 group-hover:bg-primary group-hover:text-primary-foreground transition-all overflow-hidden">
+                      {renderProjectIcon(project.icon, "h-5 w-5")}
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap justify-end">
                       <Badge variant="secondary" className="text-[10px] font-mono px-2 py-0.5">
@@ -947,15 +1041,22 @@ export function ProjectsView({
                     </Badge>
                     {getStatusBadge(selectedProject.status)}
                   </div>
-                  <SheetTitle className="text-2xl font-bold tracking-tight text-foreground mt-2">
-                    {selectedProject.name}
-                  </SheetTitle>
-                  <SheetDescription className="text-sm font-medium text-muted-foreground flex items-center gap-1.5 mt-1">
-                    <Building2 className="h-4 w-4 text-primary" /> Client:{" "}
-                    <span className="text-foreground font-semibold">
-                      {selectedProject.clientName}
-                    </span>
-                  </SheetDescription>
+                  <div className="flex items-start gap-3 mt-2">
+                    <div className="h-12 w-12 shrink-0 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold border border-primary/20 overflow-hidden shadow-xs">
+                      {renderProjectIcon(selectedProject.icon, "h-6 w-6")}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <SheetTitle className="text-2xl font-bold tracking-tight text-foreground truncate">
+                        {selectedProject.name}
+                      </SheetTitle>
+                      <SheetDescription className="text-sm font-medium text-muted-foreground flex items-center gap-1.5 mt-1">
+                        <Building2 className="h-4 w-4 text-primary shrink-0" /> Client:{" "}
+                        <span className="text-foreground font-semibold truncate">
+                          {selectedProject.clientName}
+                        </span>
+                      </SheetDescription>
+                    </div>
+                  </div>
                 </SheetHeader>
 
                 <div className="space-y-6 py-6 text-sm">
@@ -1010,12 +1111,19 @@ export function ProjectsView({
                     </div>
                     {assignedList.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {assignedList.map((empName, i) => (
-                          <Badge key={i} variant="secondary" className="px-2.5 py-1 text-xs font-normal">
-                            <span className="h-2 w-2 rounded-full bg-emerald-500 mr-1.5" />
-                            {empName}
-                          </Badge>
-                        ))}
+                        {assignedList.map((empName, i) => {
+                          const matchedEmp = employees.find((e) => e.name === empName || e.employeeId === empName);
+                          return (
+                            <Badge key={i} variant="secondary" className="px-2.5 py-1 text-xs font-normal flex items-center gap-1.5">
+                              {matchedEmp?.avatar ? (
+                                <img src={matchedEmp.avatar} alt={empName} className="h-4 w-4 rounded-full object-cover shrink-0" />
+                              ) : (
+                                <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                              )}
+                              <span>{empName}</span>
+                            </Badge>
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="text-xs text-muted-foreground italic">No team members assigned yet.</div>
@@ -1090,6 +1198,88 @@ export function ProjectsView({
                   setFormData((prev) => ({ ...prev, clientName: val }))
                 }
               />
+            </div>
+
+            {/* Project Icon Selector & Upload */}
+            <div className="grid gap-2 border-t border-b border-border py-3 my-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold">Project Icon / Logo</Label>
+                {formData.icon && formData.icon.includes("cloudinary.com") && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                    <Check className="h-3 w-3" /> Cloudinary Logo
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-4 bg-muted/40 p-3 rounded-lg border border-border">
+                <div className="relative h-12 w-12 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shadow-xs shrink-0 overflow-hidden">
+                  {isUploadingIcon ? (
+                    <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                      <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                    </div>
+                  ) : (
+                    renderProjectIcon(formData.icon, "h-6 w-6")
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <div className="flex items-center gap-2">
+                    <label className={`cursor-pointer inline-flex items-center justify-center rounded-md text-xs font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/80 h-8 px-3 py-1 border border-border shadow-xs transition-colors ${isUploadingIcon ? "opacity-50 pointer-events-none" : ""}`}>
+                      {isUploadingIcon ? (
+                        <>
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="mr-1.5 h-3.5 w-3.5" /> Upload Custom Logo
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={isUploadingIcon}
+                        onChange={handleIconFileChange}
+                      />
+                    </label>
+                    {formData.icon && !isUploadingIcon && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                        onClick={() => setFormData((prev) => ({ ...prev, icon: "" }))}
+                      >
+                        Reset Icon
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {isUploadingIcon
+                      ? "Streaming logo directly to Cloudinary..."
+                      : "Choose a preset icon below or upload custom logo (Max 5MB)"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-2">
+                <span className="text-xs text-muted-foreground mb-2 block font-medium">Select Icon Preset:</span>
+                <div className="grid grid-cols-5 sm:grid-cols-8 gap-2">
+                  {PROJECT_ICON_PRESETS.map((preset) => {
+                    const IconComp = preset.icon;
+                    const isSelected = formData.icon === preset.key;
+                    return (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, icon: preset.key }))}
+                        className={`h-9 w-9 rounded-lg flex items-center justify-center border transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary ring-2 ring-primary/30 scale-105" : "bg-card hover:bg-accent border-border text-muted-foreground hover:text-foreground"}`}
+                        title={preset.label}
+                      >
+                        <IconComp className="h-4 w-4" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1289,6 +1479,13 @@ export function ProjectsView({
                                       onChange={() => { }} // Controlled by div click
                                       className="rounded border-input text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer pointer-events-none"
                                     />
+                                    <div className="h-5 w-5 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold text-[10px] shrink-0 overflow-hidden">
+                                      {emp.avatar ? (
+                                        <img src={emp.avatar} alt={emp.name} className="h-full w-full object-cover" />
+                                      ) : (
+                                        emp.name ? emp.name.charAt(0).toUpperCase() : "E"
+                                      )}
+                                    </div>
                                     <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0">
                                       {emp.employeeId || "EMP"}
                                     </Badge>
@@ -1378,12 +1575,14 @@ export function ProjectsView({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting
-                  ? "Saving..."
-                  : editingProject
-                    ? "Update Project"
-                    : "Add Project"}
+              <Button type="submit" disabled={isSubmitting || isUploadingIcon}>
+                {isUploadingIcon
+                  ? "Uploading Logo..."
+                  : isSubmitting
+                    ? "Saving..."
+                    : editingProject
+                      ? "Update Project"
+                      : "Add Project"}
               </Button>
             </SheetFooter>
           </form>

@@ -7,6 +7,9 @@ const Employee = require("./models/Employee");
 const User = require("./models/User");
 const Project = require("./models/Project");
 const { requireAuth, JWT_SECRET } = require("./middleware/auth");
+const upload = require("./middleware/upload");
+const multer = require("multer");
+const { uploadStream } = require("./config/cloudinary");
 
 const app = express();
 app.use(
@@ -19,7 +22,8 @@ app.use(
         credentials: true,
     })
 );
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT;
@@ -57,6 +61,47 @@ mongoose.connect(MONGO_URI)
         console.log(error);
     });
 
+// Upload Routes (Multer + Cloudinary)
+app.post("/api/upload/avatar", requireAuth, upload.single("avatar"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: "No avatar image file provided." });
+        }
+        const result = await uploadStream(req.file.buffer, "employee_avatars");
+        res.status(200).json({
+            message: "Avatar uploaded successfully",
+            url: result.secure_url,
+            public_id: result.public_id,
+        });
+    } catch (error) {
+        console.error("Cloudinary avatar upload error:", error);
+        res.status(500).json({
+            message: "Failed to upload avatar to Cloudinary",
+            error: error.message,
+        });
+    }
+});
+
+app.post("/api/upload/icon", requireAuth, upload.single("icon"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: "No icon image file provided." });
+        }
+        const result = await uploadStream(req.file.buffer, "project_icons");
+        res.status(200).json({
+            message: "Project icon uploaded successfully",
+            url: result.secure_url,
+            public_id: result.public_id,
+        });
+    } catch (error) {
+        console.error("Cloudinary project icon upload error:", error);
+        res.status(500).json({
+            message: "Failed to upload project icon to Cloudinary",
+            error: error.message,
+        });
+    }
+});
+
 // Employees API Routes (Protected by JWT requireAuth)
 app.get("/api/employees", requireAuth, async (req, res) => {
     try {
@@ -73,7 +118,7 @@ app.get("/api/employees", requireAuth, async (req, res) => {
 
 app.post("/api/employees", requireAuth, async (req, res) => {
     try {
-        let { employeeId, name, department } = req.body;
+        let { employeeId, name, department, avatar } = req.body;
         const userId = req.userId;
 
         if (!name || !department) {
@@ -113,6 +158,7 @@ app.post("/api/employees", requireAuth, async (req, res) => {
             employeeId,
             name,
             department,
+            avatar: avatar || "",
             userId
         });
         res.status(201).json(employee);
@@ -149,7 +195,7 @@ app.delete("/api/employees/:id", requireAuth, async (req, res) => {
 
 app.put("/api/employees/:id", requireAuth, async (req, res) => {
     try {
-        const { employeeId, name, department } = req.body;
+        const { employeeId, name, department, avatar } = req.body;
 
         const existingEmployee = await Employee.findOne({
             employeeId,
@@ -164,7 +210,7 @@ app.put("/api/employees/:id", requireAuth, async (req, res) => {
 
         const employee = await Employee.findOneAndUpdate(
             { _id: req.params.id, userId: req.userId },
-            { employeeId, name, department },
+            { employeeId, name, department, avatar: avatar || "" },
             {
                 new: true,
                 runValidators: true
@@ -194,7 +240,7 @@ app.get("/api/projects", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
         const projects = await Project.find({ userId })
-            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status")
+            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation")
             .sort({ endDate: 1 });
         res.json(projects);
     } catch (error) {
@@ -233,6 +279,7 @@ app.post("/api/projects", requireAuth, async (req, res) => {
             allottedHours,
             employeeCount,
             assignedEmployees,
+            icon,
             theme,
             database,
             language,
@@ -261,6 +308,7 @@ app.post("/api/projects", requireAuth, async (req, res) => {
             allottedHours: Number(allottedHours) || 0,
             employeeCount: Number(employeeCount) || parsedAssigned.length || 1,
             assignedEmployees: parsedAssigned,
+            icon: icon || "",
             theme: theme || "",
             database: database || "",
             language: language || "",
@@ -290,6 +338,7 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
             allottedHours,
             employeeCount,
             assignedEmployees,
+            icon,
             theme,
             database,
             language,
@@ -311,6 +360,7 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
             allottedHours: Number(allottedHours) || 0,
             employeeCount: Number(employeeCount) || parsedAssigned.length || 1,
             assignedEmployees: parsedAssigned,
+            icon: icon || "",
             theme: theme || "",
             database: database || "",
             language: language || "",
@@ -449,6 +499,19 @@ app.post("/api/register", async (req, res) => {
             error: error.message
         });
     }
+});
+
+// Upload & General Error handling middleware
+app.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+            return res.status(400).json({ message: "File size exceeds 5MB limit." });
+        }
+        return res.status(400).json({ message: `Upload error: ${err.message}` });
+    } else if (err) {
+        return res.status(400).json({ message: err.message || "An error occurred during upload." });
+    }
+    next();
 });
 
 app.listen(PORT, () => {

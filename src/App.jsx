@@ -73,9 +73,22 @@ import {
   ShieldCheck,
   UserCheck,
   Briefcase,
+  Upload,
+  Loader2,
+  Camera,
+  Check,
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { ProjectsView } from "@/components/ProjectsView";
+
+const PRESET_AVATARS = [
+  "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
+  "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80",
+  "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80",
+  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80",
+  "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=150&q=80",
+  "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=150&q=80"
+];
 const generateNextEmployeeId = (employeesList = []) => {
   let maxNum = 0;
   (employeesList || []).forEach((emp) => {
@@ -125,6 +138,8 @@ function App() {
   const [employeeId, setEmployeeId] = useState("");
   const [name, setName] = useState("");
   const [department, setDepartment] = useState("");
+  const [avatar, setAvatar] = useState("");
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [loginError, setLoginError] = useState("");
   const [deletingEmployee, setDeletingEmployee] = useState(null);
@@ -296,6 +311,50 @@ function App() {
     navigate("/")
   };
 
+  const handleAvatarFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setFormError("Avatar image size should be less than 5MB.");
+      return;
+    }
+
+    // Set immediate preview for responsive feedback
+    const previewUrl = URL.createObjectURL(file);
+    setAvatar(previewUrl);
+    setIsUploadingAvatar(true);
+    setFormError("");
+
+    try {
+      const token = localStorage.getItem("app_token");
+      const uploadData = new FormData();
+      uploadData.append("avatar", file);
+
+      const res = await fetch(`${API_BASE_URL}/api/upload/avatar`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: uploadData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setFormError(data.message || "Failed to upload avatar to Cloudinary.");
+        setAvatar(editingEmployee?.avatar || "");
+      } else if (data.url) {
+        setAvatar(data.url);
+      }
+    } catch (err) {
+      console.error("Avatar upload failed:", err);
+      setFormError("Network error while uploading avatar to Cloudinary.");
+      setAvatar(editingEmployee?.avatar || "");
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
   const handleAddEmployee = async () => {
     setFormError("");
     const token = localStorage.getItem("app_token");
@@ -311,6 +370,7 @@ function App() {
           employeeId: finalEmployeeId,
           name,
           department,
+          avatar: avatar || "",
         }),
       });
 
@@ -325,6 +385,7 @@ function App() {
       setEmployeeId("");
       setName("");
       setDepartment("");
+      setAvatar("");
       setFormError("");
       setShowAddForm(false);
     } catch (error) {
@@ -373,6 +434,7 @@ function App() {
     setEmployeeId(employee.employeeId);
     setName(employee.name);
     setDepartment(employee.department);
+    setAvatar(employee.avatar || "");
     setShowAddForm(true);
   };
 
@@ -392,6 +454,7 @@ function App() {
             employeeId,
             name,
             department,
+            avatar: avatar || "",
           }),
         }
       );
@@ -412,6 +475,7 @@ function App() {
       setEmployeeId("");
       setName("");
       setDepartment("");
+      setAvatar("");
       setFormError("");
       setEditingEmployee(null);
       setShowAddForm(false);
@@ -426,6 +490,7 @@ function App() {
     setEmployeeId(generateNextEmployeeId(employees));
     setName("");
     setDepartment("");
+    setAvatar("");
     setFormError("");
     setShowAddForm(true);
   };
@@ -904,7 +969,16 @@ function App() {
                                       <Badge variant="outline">{employee.employeeId}</Badge>
                                     </TableCell>
                                     <TableCell className="font-medium text-foreground">
-                                      {employee.name}
+                                      <div className="flex items-center gap-3">
+                                        <div className="h-8 w-8 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden shadow-xs">
+                                          {employee.avatar ? (
+                                            <img src={employee.avatar} alt={employee.name} className="h-full w-full object-cover" />
+                                          ) : (
+                                            employee.name ? employee.name.charAt(0).toUpperCase() : "E"
+                                          )}
+                                        </div>
+                                        <span>{employee.name}</span>
+                                      </div>
                                     </TableCell>
                                     <TableCell>
                                       <Badge variant="secondary">{employee.department}</Badge>
@@ -1086,6 +1160,85 @@ function App() {
                   onChange={(e) => setDepartment(e.target.value)}
                 />
               </div>
+
+              {/* Avatar Selection & Upload Section */}
+              <div className="grid gap-2 pt-2 border-t border-border mt-1">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold">Employee Avatar</Label>
+                  {avatar && avatar.includes("cloudinary.com") && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                      <Check className="h-3 w-3" /> Cloudinary
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-4 bg-muted/40 p-3 rounded-lg border border-border">
+                  <div className="relative h-14 w-14 rounded-full border border-border overflow-hidden bg-muted flex items-center justify-center font-bold text-lg text-primary shadow-xs shrink-0">
+                    {isUploadingAvatar ? (
+                      <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                        <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                      </div>
+                    ) : avatar ? (
+                      <img src={avatar} alt="Preview" className="h-full w-full object-cover" />
+                    ) : (
+                      <span>{name ? name.charAt(0).toUpperCase() : "E"}</span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <div className="flex items-center gap-2">
+                      <label className={`cursor-pointer inline-flex items-center justify-center rounded-md text-xs font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/80 h-8 px-3 py-1 border border-border shadow-xs transition-colors ${isUploadingAvatar ? "opacity-50 pointer-events-none" : ""}`}>
+                        {isUploadingAvatar ? (
+                          <>
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <Camera className="mr-1.5 h-3.5 w-3.5" /> Upload Photo
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={isUploadingAvatar}
+                          onChange={handleAvatarFileChange}
+                        />
+                      </label>
+                      {avatar && !isUploadingAvatar && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                          onClick={() => setAvatar("")}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {isUploadingAvatar
+                        ? "Streaming image directly to Cloudinary..."
+                        : "Upload JPG, PNG, WEBP (Max 5MB)"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-2">
+                  <span className="text-xs text-muted-foreground mb-2 block font-medium">Or pick a preset avatar:</span>
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                    {PRESET_AVATARS.map((url, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setAvatar(url)}
+                        className={`h-9 w-9 rounded-full overflow-hidden border-2 transition-all shrink-0 ${avatar === url ? "border-primary ring-2 ring-primary/30 scale-105" : "border-transparent opacity-75 hover:opacity-100"}`}
+                      >
+                        <img src={url} alt={`Preset ${idx + 1}`} className="h-full w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
 
             <SheetFooter className="gap-2 sm:gap-0 mt-6">
@@ -1093,9 +1246,18 @@ function App() {
                 Cancel
               </Button>
               <Button
+                disabled={isUploadingAvatar}
                 onClick={editingEmployee ? handleUpdateEmployee : handleAddEmployee}
               >
-                {editingEmployee ? "Save Changes" : "Add Employee"}
+                {isUploadingAvatar ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading...
+                  </>
+                ) : editingEmployee ? (
+                  "Save Changes"
+                ) : (
+                  "Add Employee"
+                )}
               </Button>
             </SheetFooter>
           </SheetContent>

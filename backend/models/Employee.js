@@ -16,6 +16,11 @@ const employeeSchema = new mongoose.Schema({
         required: true
     },
 
+    avatar: {
+        type: String,
+        default: ""
+    },
+
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",

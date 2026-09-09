@@ -34,6 +34,10 @@ const projectSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    icon: {
+      type: String,
+      default: "",
+    },
     database: {
       type: String,
       default: "",
