@@ -1,0 +1,52 @@
+# GitLab CI/CD Pipeline Configuration for Employee & Project Management App
+
+# Docker image for Node.js build environment
+image: node:20-alpine
+
+# Define Pipeline Stages
+stages:
+  - install
+  - test
+  - build
+
+# Cache node_modules across jobs to speed up pipelines
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - node_modules/
+    - .npm/
+
+# Stage 1: Install Dependencies
+install_job:
+  stage: install
+  script:
+    - echo "Installing frontend dependencies..."
+    - npm ci --prefer-offline || npm install
+  artifacts:
+    paths:
+      - node_modules/
+    expire_in: 1 day
+
+# Stage 2: Code Quality & Lint Check
+lint_job:
+  stage: test
+  script:
+    - echo "Running linter and syntax checks..."
+    - npm run lint
+  allow_failure: true
+
+# Stage 3: Production Build & Output Verification
+build_job:
+  stage: build
+  script:
+    - echo "Building production bundle..."
+    - npm run build
+  artifacts:
+    name: "dist-production-${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - dist/
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "feature/message"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
