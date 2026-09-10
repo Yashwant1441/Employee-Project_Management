@@ -287,7 +287,9 @@ function App() {
             localStorage.setItem("app_token", data.token);
           }
           localStorage.setItem("app_user", JSON.stringify(userObj));
-        } catch (e) { }
+        } catch (err) {
+          console.error("Failed to save auth state:", err);
+        }
 
         if (isSignUp) {
           setEmployees([]);
@@ -311,7 +313,9 @@ function App() {
     try {
       localStorage.removeItem("app_token");
       localStorage.removeItem("app_user");
-    } catch (e) { }
+    } catch (err) {
+      console.error("Failed to clear auth storage:", err);
+    }
     setEmail("");
     setPassword("");
     setLoginError("");
