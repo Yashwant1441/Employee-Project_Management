@@ -80,6 +80,7 @@ import {
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { ProjectsView } from "@/components/ProjectsView";
+import { NotificationModal } from "@/components/ui/NotificationModal";
 
 const PRESET_AVATARS = [
   "/avatars/avatar-1.jpg",
@@ -149,6 +150,14 @@ function App() {
   const [assigningEmployeeProjects, setAssigningEmployeeProjects] = useState(null);
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
   const [isAssigning, setIsAssigning] = useState(false);
+  const [notificationModal, setNotificationModal] = useState({
+    isOpen: false,
+    title: "",
+    entityType: "Employee",
+    actionType: "created",
+    id: "",
+    name: "",
+  });
 
   const companyInfo = {
     name: "ApexTech Global",
@@ -388,6 +397,14 @@ function App() {
       setAvatar("");
       setFormError("");
       setShowAddForm(false);
+      setNotificationModal({
+        isOpen: true,
+        title: "Employee Created Successfully",
+        entityType: "Employee",
+        actionType: "created",
+        id: data.employeeId || finalEmployeeId,
+        name: data.name || name,
+      });
     } catch (error) {
       setFormError("Something went wrong. Please try again.");
       console.log("Failed to add employee:", error);
@@ -479,6 +496,14 @@ function App() {
       setFormError("");
       setEditingEmployee(null);
       setShowAddForm(false);
+      setNotificationModal({
+        isOpen: true,
+        title: "Employee Updated Successfully",
+        entityType: "Employee",
+        actionType: "updated",
+        id: data.employeeId || employeeId,
+        name: data.name || name,
+      });
     } catch (error) {
       setFormError("Something went wrong. Please try again.");
       console.log("Failed to update employee:", error);
@@ -1383,6 +1408,16 @@ function App() {
             </SheetFooter>
           </SheetContent>
         </Sheet>
+
+        <NotificationModal
+          isOpen={notificationModal.isOpen}
+          onClose={() => setNotificationModal((prev) => ({ ...prev, isOpen: false }))}
+          title={notificationModal.title}
+          entityType={notificationModal.entityType}
+          actionType={notificationModal.actionType}
+          id={notificationModal.id}
+          name={notificationModal.name}
+        />
       </SidebarProvider>
     );
   }

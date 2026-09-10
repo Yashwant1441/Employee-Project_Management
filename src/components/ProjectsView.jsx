@@ -7,6 +7,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import { NotificationModal } from "@/components/ui/NotificationModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -272,37 +273,44 @@ function MultiSelectDropdown({
 
   return (
     <div className="flex flex-col gap-1.5 min-w-0 w-full">
-      <Label className="text-xs font-semibold text-foreground/90 flex items-center min-h-[20px] leading-tight truncate">{label}</Label>
+      {label && (
+        <Label className="text-xs font-semibold text-foreground/90 block mb-0.5 truncate">
+          {label}
+        </Label>
+      )}
       <div className="relative w-full min-w-0" ref={dropdownRef}>
         <div
           onClick={() => setIsOpen(!isOpen)}
-          className="min-h-10 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm ring-offset-background flex flex-wrap items-center gap-1.5 cursor-pointer hover:border-ring transition-colors shadow-xs min-w-0"
+          className="h-10 w-full rounded-md border border-input bg-background px-2.5 text-sm ring-offset-background flex items-center gap-1.5 cursor-pointer hover:border-ring transition-colors shadow-xs min-w-0 overflow-hidden"
         >
           {selectedItems.length > 0 ? (
-            selectedItems.map((item, i) => (
-              <Badge
-                key={i}
-                variant="secondary"
-                className="flex items-center gap-1 px-2 py-0.5 text-xs bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 max-w-full min-w-0"
-              >
-                <span className="truncate max-w-[130px] inline-block">{item}</span>
-                <span
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleItem(item);
-                  }}
-                  className="hover:text-destructive cursor-pointer ml-0.5 font-bold shrink-0"
+            <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto no-scrollbar py-0.5 flex-1">
+              {selectedItems.map((item, i) => (
+                <Badge
+                  key={i}
+                  variant="secondary"
+                  className="flex items-center gap-1 px-2 py-0.5 text-xs bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 shrink-0 rounded-md font-medium"
                 >
-                  ×
-                </span>
-              </Badge>
-            ))
+                  <span className="truncate max-w-[130px]">{item}</span>
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleItem(item);
+                    }}
+                    className="hover:text-destructive cursor-pointer ml-0.5 font-bold shrink-0 text-xs"
+                  >
+                    ×
+                  </span>
+                </Badge>
+              ))}
+            </div>
           ) : (
-            <span className="text-muted-foreground text-xs">{placeholder}</span>
+            <span className="text-muted-foreground text-xs truncate flex-1">{placeholder}</span>
           )}
           <div
-            className={`ml-auto pointer-events-none text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""
-              }`}
+            className={`ml-auto pointer-events-none text-muted-foreground transition-transform duration-200 shrink-0 ${
+              isOpen ? "rotate-180" : ""
+            }`}
           >
             <ChevronDown className="h-4 w-4" />
           </div>
@@ -402,9 +410,18 @@ export function ProjectsView({
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
+  const [showIconPresets, setShowIconPresets] = useState(false);
   const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState(false);
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState("");
   const employeeDropdownRef = useRef(null);
+  const [notificationModal, setNotificationModal] = useState({
+    isOpen: false,
+    title: "",
+    entityType: "Project",
+    actionType: "created",
+    id: "",
+    name: "",
+  });
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -768,6 +785,14 @@ export function ProjectsView({
         if (selectedProject && (selectedProject.id || selectedProject._id) === (data.id || data._id)) {
           setSelectedProject(data);
         }
+        setNotificationModal({
+          isOpen: true,
+          title: "Project Updated Successfully",
+          entityType: "Project",
+          actionType: "updated",
+          id: data.id || data._id || editingProject.id || editingProject._id,
+          name: data.name || payload.name,
+        });
       } else {
         const res = await fetch(`${API_BASE_URL}/api/projects`, {
           method: "POST",
@@ -781,6 +806,14 @@ export function ProjectsView({
           return;
         }
         setProjects((prev) => [data, ...prev]);
+        setNotificationModal({
+          isOpen: true,
+          title: "Project Created Successfully",
+          entityType: "Project",
+          actionType: "created",
+          id: data.id || data._id,
+          name: data.name || payload.name,
+        });
       }
 
       setShowFormModal(false);
@@ -1219,7 +1252,7 @@ export function ProjectsView({
             {/* Project Icon Selector & Upload */}
             <div className="grid gap-2 border-t border-b border-border py-3 my-2">
               <div className="flex items-center justify-between">
-                <Label className="text-sm font-semibold">Project Icon / Logo</Label>
+                <Label className="text-xs font-semibold text-foreground/90">Project Icon / Logo</Label>
                 {formData.icon && formData.icon.includes("cloudinary.com") && (
                   <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
                     <Check className="h-3 w-3" /> Cloudinary Logo
@@ -1237,7 +1270,7 @@ export function ProjectsView({
                   )}
                 </div>
                 <div className="flex flex-col gap-1.5 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <label className={`cursor-pointer inline-flex items-center justify-center rounded-md text-xs font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/80 h-8 px-3 py-1 border border-border shadow-xs transition-colors ${isUploadingIcon ? "opacity-50 pointer-events-none" : ""}`}>
                       {isUploadingIcon ? (
                         <>
@@ -1256,6 +1289,19 @@ export function ProjectsView({
                         onChange={handleIconFileChange}
                       />
                     </label>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs gap-1.5 border-border hover:bg-accent"
+                      onClick={() => setShowIconPresets((prev) => !prev)}
+                    >
+                      <Palette className="h-3.5 w-3.5 text-primary" />
+                      {showIconPresets ? "Hide Icon Presets" : "Choose Preset Icon"}
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${showIconPresets ? "rotate-180" : ""}`} />
+                    </Button>
+
                     {formData.icon && !isUploadingIcon && (
                       <Button
                         type="button"
@@ -1271,31 +1317,45 @@ export function ProjectsView({
                   <p className="text-[11px] text-muted-foreground">
                     {isUploadingIcon
                       ? "Streaming logo directly to Cloudinary..."
-                      : "Choose a preset icon below or upload custom logo (Max 5MB)"}
+                      : "Click 'Choose Preset Icon' or upload a custom logo (Max 5MB)"}
                   </p>
                 </div>
               </div>
 
-              <div className="mt-2">
-                <span className="text-xs text-muted-foreground mb-2 block font-medium">Select Icon Preset:</span>
-                <div className="grid grid-cols-5 sm:grid-cols-8 gap-2">
-                  {PROJECT_ICON_PRESETS.map((preset) => {
-                    const IconComp = preset.icon;
-                    const isSelected = formData.icon === preset.key;
-                    return (
-                      <button
-                        key={preset.key}
-                        type="button"
-                        onClick={() => setFormData((prev) => ({ ...prev, icon: preset.key }))}
-                        className={`h-9 w-9 rounded-lg flex items-center justify-center border transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary ring-2 ring-primary/30 scale-105" : "bg-card hover:bg-accent border-border hover:scale-105"}`}
-                        title={preset.label}
-                      >
-                        <IconComp className={`h-4 w-4 ${isSelected ? "text-primary-foreground" : preset.color || "text-foreground"}`} />
-                      </button>
-                    );
-                  })}
+              {showIconPresets && (
+                <div className="mt-2 p-3 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs animate-in fade-in-50 duration-200">
+                  <div className="flex items-center justify-between mb-2 px-0.5">
+                    <span className="text-xs font-semibold text-foreground/90">Select Preset Icon:</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowIconPresets(false)}
+                      className="text-[11px] font-medium text-muted-foreground hover:text-foreground underline"
+                    >
+                      Close Presets
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
+                    {PROJECT_ICON_PRESETS.map((preset) => {
+                      const IconComp = preset.icon;
+                      const isSelected = formData.icon === preset.key;
+                      return (
+                        <button
+                          key={preset.key}
+                          type="button"
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, icon: preset.key }));
+                            setShowIconPresets(false);
+                          }}
+                          className={`h-9 w-9 rounded-lg flex items-center justify-center border transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary ring-2 ring-primary/30 scale-105" : "bg-background hover:bg-accent border-border hover:scale-105"}`}
+                          title={preset.label}
+                        >
+                          <IconComp className={`h-4 w-4 ${isSelected ? "text-primary-foreground" : preset.color || "text-foreground"}`} />
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1396,40 +1456,42 @@ export function ProjectsView({
               });
 
               return (
-                <div className="grid gap-2">
-                  <Label htmlFor="assignedEmployees">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="assignedEmployees" className="text-xs font-semibold text-foreground/90 block mb-0.5">
                     Assigned Employees (Multi-Select)
                   </Label>
                   <div className="relative" ref={employeeDropdownRef}>
                     <div
                       onClick={() => setIsEmployeeDropdownOpen(!isEmployeeDropdownOpen)}
-                      className="min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background flex flex-wrap items-center gap-1.5 cursor-pointer hover:border-ring transition-colors shadow-xs"
+                      className="h-10 w-full rounded-md border border-input bg-background px-2.5 text-sm ring-offset-background flex items-center gap-1.5 cursor-pointer hover:border-ring transition-colors shadow-xs min-w-0 overflow-hidden"
                     >
                       {selectedNames.length > 0 ? (
-                        selectedNames.map((empName, i) => (
-                          <Badge
-                            key={i}
-                            variant="secondary"
-                            className="flex items-center gap-1 px-2 py-0.5 text-xs bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20"
-                          >
-                            <span>{empName}</span>
-                            <span
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleEmployee(empName);
-                              }}
-                              className="hover:text-destructive cursor-pointer ml-0.5 font-bold"
+                        <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto no-scrollbar py-0.5 flex-1">
+                          {selectedNames.map((empName, i) => (
+                            <Badge
+                              key={i}
+                              variant="secondary"
+                              className="flex items-center gap-1 px-2 py-0.5 text-xs bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 shrink-0 rounded-md font-medium"
                             >
-                              ×
-                            </span>
-                          </Badge>
-                        ))
+                              <span className="truncate max-w-[130px]">{empName}</span>
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleEmployee(empName);
+                                }}
+                                className="hover:text-destructive cursor-pointer ml-0.5 font-bold shrink-0 text-xs"
+                              >
+                                ×
+                              </span>
+                            </Badge>
+                          ))}
+                        </div>
                       ) : (
-                        <span className="text-muted-foreground text-xs">
+                        <span className="text-muted-foreground text-xs truncate flex-1">
                           Select employees...
                         </span>
                       )}
-                      <div className={`ml-auto pointer-events-none text-muted-foreground transition-transform duration-200 ${isEmployeeDropdownOpen ? "rotate-180" : ""}`}>
+                      <div className={`ml-auto pointer-events-none text-muted-foreground transition-transform duration-200 shrink-0 ${isEmployeeDropdownOpen ? "rotate-180" : ""}`}>
                         <ChevronDown className="h-4 w-4" />
                       </div>
                     </div>
@@ -1565,20 +1627,23 @@ export function ProjectsView({
                 label="Where Deployed?"
                 value={formData.deploymentLocation}
                 options={dynamicDeployments}
-                // placeholder="Select or add deployment locations..."
+                placeholder="Select deployment..."
                 onChange={(val) =>
                   setFormData((prev) => ({ ...prev, deploymentLocation: val }))
                 }
               />
 
               <div className="flex flex-col gap-1.5 min-w-0 w-full">
-                <Label htmlFor="version" className="text-xs font-semibold text-foreground/90 flex items-center min-h-[20px] leading-tight truncate">Project Version</Label>
+                <Label htmlFor="version" className="text-xs font-semibold text-foreground/90 block mb-0.5 truncate">
+                  Project Version
+                </Label>
                 <Input
                   id="version"
                   name="version"
                   placeholder="e.g. 1.0.0"
                   value={formData.version}
                   onChange={handleFormChange}
+                  className="h-10"
                 />
               </div>
             </div>
@@ -1631,6 +1696,16 @@ export function ProjectsView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <NotificationModal
+        isOpen={notificationModal.isOpen}
+        onClose={() => setNotificationModal((prev) => ({ ...prev, isOpen: false }))}
+        title={notificationModal.title}
+        entityType={notificationModal.entityType}
+        actionType={notificationModal.actionType}
+        id={notificationModal.id}
+        name={notificationModal.name}
+      />
     </div>
   );
 }
