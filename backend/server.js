@@ -1,8 +1,12 @@
+const dns = require("dns");
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
+
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const Employee = require("./models/Employee");
 const User = require("./models/User");
 const Project = require("./models/Project");
@@ -46,6 +50,7 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 
+console.log("Connecting to MongoDB:", MONGO_URI ? (MONGO_URI.substring(0, 20) + "...") : "UNDEFINED");
 mongoose.connect(MONGO_URI)
     .then(async () => {
         console.log("MongoDB connected");
@@ -428,7 +433,16 @@ app.post("/api/login", async (req, res) => {
             });
         }
 
-        if (user.password !== password) {
+        // Verify password using bcrypt or fallback for legacy plain-text accounts
+        let isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch && user.password === password) {
+            // Legacy account plain-text match: auto-upgrade password to salted bcrypt hash
+            isMatch = true;
+            user.password = await bcrypt.hash(password, 10);
+            await user.save();
+        }
+
+        if (!isMatch) {
             return res.status(401).json({
                 message: "Invalid email or password"
             });
@@ -474,9 +488,12 @@ app.post("/api/register", async (req, res) => {
             });
         }
 
+        // Salt and hash user password using bcryptjs
+        const hashedPassword = await bcrypt.hash(password, 10);
+
         const user = await User.create({
             email: normalizedEmail,
-            password: password
+            password: hashedPassword
         });
 
         const token = jwt.sign(
