@@ -4,6 +4,20 @@ A full-stack, enterprise-grade web application designed for managing company emp
 
 ---
 
+## 📚 Project Documentation Suite
+
+Click any guide below to open its full Markdown documentation page:
+
+| Guide | Focus Area | Direct Link |
+| :--- | :--- | :--- |
+| 📖 **Getting Started** | Overview, target audience & prerequisites | [Read Guide ➔](docs/Getting_Started.md) |
+| ⚙️ **Installation** | Local setup, `.env` config & npm execution | [Read Guide ➔](docs/Installation.md) |
+| 🔒 **Authentication** | Bcrypt password hashing & JWT security | [Read Guide ➔](docs/Authentication.md) |
+| 📡 **API Documentation** | Endpoints, JSON bodies & Cloudinary routes | [Read Guide ➔](docs/API_Documentation.md) |
+| 🚀 **Deployment** | Vercel, Render, Docker & GitLab CI/CD | [Read Guide ➔](docs/Deployment.md) |
+
+---
+
 ## 📋 Table of Contents
 - [Overview](#overview)
 - [Tech Stack](#tech-stack)
