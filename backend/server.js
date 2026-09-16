@@ -23,6 +23,7 @@ app.use(
             "http://localhost:5173",
             "http://localhost:3000"
         ],
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "QUERY", "OPTIONS"],
         credentials: true,
     })
 );
@@ -240,7 +241,84 @@ app.put("/api/employees/:id", requireAuth, async (req, res) => {
     }
 });
 
+// HTTP QUERY Route for Employees (RFC 10008) - Read-only with Request Body filters
+app.all("/api/employees/query", requireAuth, async (req, res, next) => {
+    if (req.method !== "QUERY" && req.method !== "POST") return next();
+    try {
+        const userId = req.userId;
+        const { department, search } = req.body || {};
+
+        const filter = { userId };
+        if (department && department !== "All") {
+            filter.department = department;
+        }
+        if (search) {
+            filter.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { employeeId: { $regex: search, $options: "i" } },
+                { department: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        const employees = await Employee.find(filter);
+        res.setHeader("Accept-Query", "application/json");
+        res.json({
+            method: req.method,
+            count: employees.length,
+            employees
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to query employees",
+            error: error.message
+        });
+    }
+});
+
 // Projects API Routes (Protected by JWT requireAuth)
+// HTTP QUERY Route for Projects (RFC 10008) - Read-only with Request Body filters
+app.all("/api/projects/query", requireAuth, async (req, res, next) => {
+    if (req.method !== "QUERY" && req.method !== "POST") return next();
+    try {
+        const userId = req.userId;
+        const { status, language, theme, search } = req.body || {};
+
+        const filter = { userId };
+        if (status && status !== "All") {
+            filter.status = status;
+        }
+        if (language) {
+            filter.language = { $regex: language, $options: "i" };
+        }
+        if (theme) {
+            filter.theme = { $regex: theme, $options: "i" };
+        }
+        if (search) {
+            filter.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { clientName: { $regex: search, $options: "i" } },
+                { database: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        const projects = await Project.find(filter)
+            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation")
+            .sort({ endDate: 1 });
+
+        res.setHeader("Accept-Query", "application/json");
+        res.json({
+            method: req.method,
+            count: projects.length,
+            projects
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to query projects",
+            error: error.message
+        });
+    }
+});
+
 app.get("/api/projects", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
