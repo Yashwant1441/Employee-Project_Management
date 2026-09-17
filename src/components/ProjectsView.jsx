@@ -416,6 +416,36 @@ export function ProjectsView({
   const [selectedProject, setSelectedProject] = useState(null);
   const [viewMode, setViewMode] = useState("grid");
   const [statuses, setStatuses] = useState(["Pending", "In Progress", "Delayed", "Completed"]);
+  const [activities, setActivities] = useState([]);
+  const [isLoadingActivities, setIsLoadingActivities] = useState(false);
+
+  useEffect(() => {
+    if (!selectedProject) {
+      setActivities([]);
+      return;
+    }
+    const fetchActivities = async () => {
+      setIsLoadingActivities(true);
+      try {
+        const token = localStorage.getItem("app_token") || localStorage.getItem("token");
+        const projectId = selectedProject._id || selectedProject.id;
+        const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/activities`, {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setActivities(Array.isArray(data) ? data : []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch activity logs:", err);
+      } finally {
+        setIsLoadingActivities(false);
+      }
+    };
+    fetchActivities();
+  }, [selectedProject]);
 
   useEffect(() => {
     const fetchStatuses = async () => {
@@ -546,6 +576,9 @@ export function ProjectsView({
           String(p.id || p._id) === String(projectId) ? { ...p, ...finalProject } : p
         )
       );
+      if (selectedProject && String(selectedProject.id || selectedProject._id) === String(projectId)) {
+        setSelectedProject((prev) => ({ ...prev, ...finalProject }));
+      }
     } catch (error) {
       console.error("Error updating project status:", error);
       // Revert status on failure
@@ -1372,6 +1405,72 @@ export function ProjectsView({
                       </div>
                     ) : (
                       <div className="text-xs text-muted-foreground italic">No team members assigned yet.</div>
+                    )}
+                  </div>
+
+                  {/* Activity History & Audit Log Timeline */}
+                  <div className="space-y-3 pt-4 border-t border-border">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5 text-primary" /> Activity History & Audit Log
+                      </span>
+                      <Badge variant="secondary" className="text-[10px] font-mono">
+                        {activities.length} {activities.length === 1 ? "entry" : "entries"}
+                      </Badge>
+                    </div>
+
+                    {isLoadingActivities ? (
+                      <div className="flex items-center justify-center py-6 text-xs text-muted-foreground gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" /> Loading activity logs...
+                      </div>
+                    ) : activities.length > 0 ? (
+                      <div className="relative pl-4 space-y-3 border-l-2 border-primary/30 my-2">
+                        {activities.map((act, index) => (
+                          <div key={act._id || act.id || index} className="relative group">
+                            {/* Timeline Node Dot */}
+                            <div className="absolute -left-[21px] top-1.5 h-3.5 w-3.5 rounded-full bg-background border-2 border-primary group-hover:scale-125 transition-transform flex items-center justify-center">
+                              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                            </div>
+
+                            <div className="bg-muted/40 hover:bg-muted/70 p-3 rounded-lg border border-border/60 transition-colors space-y-1">
+                              <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                                <span className="font-semibold text-foreground flex items-center gap-1">
+                                  <Zap className="h-3 w-3 text-amber-500 shrink-0" />
+                                  {!act.fromStatus || act.fromStatus === act.toStatus ? (
+                                    <span>Created as <Badge variant="outline" className="text-[10px] font-semibold px-1.5 py-0">{act.toStatus || "Pending"}</Badge></span>
+                                  ) : (
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      <span className="text-muted-foreground">{act.fromStatus}</span>
+                                      <span className="text-primary font-bold">➔</span>
+                                      <span className="font-bold text-foreground">{act.toStatus}</span>
+                                    </div>
+                                  )}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  {act.createdAt ? new Date(act.createdAt).toLocaleString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  }) : "Just now"}
+                                </span>
+                              </div>
+
+                              <div className="text-[11px] text-muted-foreground flex items-center justify-between pt-1 border-t border-border/30">
+                                <span className="flex items-center gap-1">
+                                  <Users className="h-3 w-3 text-muted-foreground" />
+                                  User: <span className="text-foreground font-medium">{act.userEmail || "System Admin"}</span>
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-lg bg-muted/20 border border-dashed border-border text-center text-xs text-muted-foreground">
+                        No activity history logged for this project yet.
+                      </div>
                     )}
                   </div>
                 </div>

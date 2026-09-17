@@ -10,6 +10,7 @@ const bcrypt = require("bcryptjs");
 const Employee = require("./models/Employee");
 const User = require("./models/User");
 const Project = require("./models/Project");
+const ActivityLog = require("./models/ActivityLog");
 const { requireAuth, JWT_SECRET } = require("./middleware/auth");
 const upload = require("./middleware/upload");
 const multer = require("multer");
@@ -402,6 +403,24 @@ app.post("/api/projects", requireAuth, async (req, res) => {
             userId
         });
 
+        // Record initial creation activity log
+        try {
+            let uEmail = "System User";
+            const u = await User.findById(userId);
+            if (u && u.email) uEmail = u.email;
+
+            await ActivityLog.create({
+                projectId: project._id,
+                projectName: project.name,
+                fromStatus: "Created",
+                toStatus: project.status || "Pending",
+                userEmail: uEmail,
+                userId
+            });
+        } catch (e) {
+            console.error("Activity log creation error:", e.message);
+        }
+
         res.status(201).json(project);
     } catch (error) {
         res.status(500).json({
@@ -413,6 +432,13 @@ app.post("/api/projects", requireAuth, async (req, res) => {
 
 app.put("/api/projects/:id", requireAuth, async (req, res) => {
     try {
+        const existingProject = await Project.findOne({ _id: req.params.id, userId: req.userId });
+        if (!existingProject) {
+            return res.status(404).json({ message: "Project not found or unauthorized" });
+        }
+
+        const oldStatus = existingProject.status || "Pending";
+
         const {
             name,
             clientName,
@@ -449,7 +475,7 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
             language: language || "",
             extraRequirements: extraRequirements || "",
             deploymentLocation: deploymentLocation || "",
-            status: status !== undefined ? status : "Pending",
+            status: status !== undefined ? status : oldStatus,
             version: version || "1.0.0"
         };
 
@@ -459,14 +485,48 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
             { new: true, runValidators: true }
         );
 
-        if (!project) {
-            return res.status(404).json({ message: "Project not found or unauthorized" });
+        // Record ActivityLog if status changed
+        const newStatus = project.status;
+        if (oldStatus !== newStatus) {
+            try {
+                let uEmail = "System User";
+                const u = await User.findById(req.userId);
+                if (u && u.email) uEmail = u.email;
+
+                await ActivityLog.create({
+                    projectId: project._id,
+                    projectName: project.name,
+                    fromStatus: oldStatus,
+                    toStatus: newStatus,
+                    userEmail: uEmail,
+                    userId: req.userId
+                });
+            } catch (e) {
+                console.error("Activity log update error:", e.message);
+            }
         }
 
         res.json(project);
     } catch (error) {
         res.status(500).json({
             message: "Failed to update project",
+            error: error.message
+        });
+    }
+});
+
+// GET project activity logs
+app.get("/api/projects/:id/activities", requireAuth, async (req, res) => {
+    try {
+        const activities = await ActivityLog.find({
+            projectId: req.params.id,
+            userId: req.userId
+        }).sort({ createdAt: -1 });
+
+        res.json(activities);
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to fetch project activity logs",
             error: error.message
         });
     }
