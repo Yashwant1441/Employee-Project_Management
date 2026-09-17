@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import API_BASE_URL from "../api";
+import { KanbanBoard } from "./KanbanBoard";
 import {
   Card,
   CardContent,
@@ -76,6 +77,8 @@ import {
   GitBranch,
   Flame,
   Workflow,
+  LayoutGrid,
+  Kanban,
 } from "lucide-react";
 
 const PROJECT_ICON_PRESETS = [
@@ -138,8 +141,8 @@ const PUBLIC_HOLIDAYS = [
 ];
 
 const getStatusBadge = (status) => {
-  const s = status || "In Progress";
-  switch (s) {
+  if (!status) return null;
+  switch (status) {
     case "Completed":
       return (
         <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400 font-semibold text-[11px] px-2 py-0.5">
@@ -159,10 +162,15 @@ const getStatusBadge = (status) => {
         </Badge>
       );
     case "In Progress":
-    default:
       return (
         <Badge variant="outline" className="bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400 font-semibold text-[11px] px-2 py-0.5">
           ⚡ In Progress
+        </Badge>
+      );
+    default:
+      return (
+        <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 font-semibold text-[11px] px-2 py-0.5">
+          {status}
         </Badge>
       );
   }
@@ -406,6 +414,156 @@ export function ProjectsView({
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProject, setSelectedProject] = useState(null);
+  const [viewMode, setViewMode] = useState("grid");
+  const [statuses, setStatuses] = useState(["Pending", "In Progress", "Delayed", "Completed"]);
+
+  useEffect(() => {
+    const fetchStatuses = async () => {
+      try {
+        const token = localStorage.getItem("app_token") || localStorage.getItem("token");
+        const response = await fetch(`${API_BASE_URL}/api/statuses`, {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setStatuses(data);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch custom statuses:", err);
+      }
+    };
+    fetchStatuses();
+  }, []);
+
+  const handleAddStatus = async (newStatusName) => {
+    if (!newStatusName) return;
+    const trimmed = newStatusName.trim();
+    if (statuses.includes(trimmed)) return;
+
+    // Optimistically update React state
+    setStatuses((prev) => [...prev, trimmed]);
+
+    try {
+      const token = localStorage.getItem("app_token") || localStorage.getItem("token");
+      const response = await fetch(`${API_BASE_URL}/api/statuses`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.statuses)) {
+          setStatuses(data.statuses);
+        }
+      }
+    } catch (err) {
+      console.error("Error adding status:", err);
+    }
+  };
+
+  const handleDeleteStatus = async (statusToDelete, targetStatus) => {
+    if (!statusToDelete) return;
+    const fallback = targetStatus || statuses.find((s) => s !== statusToDelete) || "Pending";
+
+    // Optimistically update statuses & reassign affected projects
+    setStatuses((prev) => prev.filter((s) => s !== statusToDelete));
+    setProjects((prevProjects) =>
+      prevProjects.map((p) =>
+        (p.status || "In Progress") === statusToDelete ? { ...p, status: fallback } : p
+      )
+    );
+
+    try {
+      const token = localStorage.getItem("app_token") || localStorage.getItem("token");
+      const response = await fetch(
+        `${API_BASE_URL}/api/statuses/${encodeURIComponent(statusToDelete)}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ targetStatus: fallback }),
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.statuses)) {
+          setStatuses(data.statuses);
+        }
+      }
+    } catch (err) {
+      console.error("Error deleting status:", err);
+    }
+  };
+
+  const handleUpdateProjectStatus = async (projectId, newStatus) => {
+    const targetProject = (projects || []).find(
+      (p) => String(p.id || p._id) === String(projectId)
+    );
+    if (!targetProject) return;
+
+    const oldStatus = targetProject.status || "In Progress";
+    if (oldStatus === newStatus) return;
+
+    // Optimistically update React state
+    setProjects((prevProjects) =>
+      prevProjects.map((p) =>
+        String(p.id || p._id) === String(projectId) ? { ...p, status: newStatus } : p
+      )
+    );
+
+    try {
+      const token = localStorage.getItem("app_token") || localStorage.getItem("token");
+      const targetId = targetProject._id || targetProject.id;
+      const response = await fetch(`${API_BASE_URL}/api/projects/${targetId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          ...targetProject,
+          status: newStatus,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update project status");
+      }
+
+      const updatedData = await response.json();
+      const finalProject = updatedData.project || updatedData;
+      setProjects((prevProjects) =>
+        prevProjects.map((p) =>
+          String(p.id || p._id) === String(projectId) ? { ...p, ...finalProject } : p
+        )
+      );
+    } catch (error) {
+      console.error("Error updating project status:", error);
+      // Revert status on failure
+      setProjects((prevProjects) =>
+        prevProjects.map((p) =>
+          String(p.id || p._id) === String(projectId) ? { ...p, status: oldStatus } : p
+        )
+      );
+      setNotificationModal({
+        isOpen: true,
+        title: "Status Update Failed",
+        entityType: "Project",
+        actionType: "updated",
+        id: String(projectId),
+        name: `${targetProject.name} (Could not sync with server)`,
+      });
+    }
+  };
 
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
@@ -450,7 +608,7 @@ export function ProjectsView({
     database: "",
     language: "",
     deploymentLocation: "",
-    status: "In Progress",
+    status: (statuses && statuses[0]) || "Pending",
     version: "1.0.0",
   });
   const [formError, setFormError] = useState("");
@@ -562,7 +720,7 @@ export function ProjectsView({
       database: "",
       language: "",
       deploymentLocation: "",
-      status: "In Progress",
+      status: (statuses && statuses[0]) || "Pending",
       version: "1.0.0",
     });
     setFormError("");
@@ -952,13 +1110,51 @@ export function ProjectsView({
             className="pl-9 text-sm"
           />
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground self-end sm:self-center">
-          Showing <span className="font-semibold text-foreground">{filteredProjects.length}</span> Total Projects
+
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          {/* View Mode Switcher Toggle */}
+          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border border-border">
+            <Button
+              variant={viewMode === "grid" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("grid")}
+              className={`h-8 px-3 text-xs font-semibold gap-1.5 transition-all ${
+                viewMode === "grid" ? "shadow-sm bg-background text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" /> Grid View
+            </Button>
+            <Button
+              variant={viewMode === "kanban" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("kanban")}
+              className={`h-8 px-3 text-xs font-semibold gap-1.5 transition-all ${
+                viewMode === "kanban" ? "shadow-sm bg-background text-primary font-bold" : "text-muted-foreground"
+              }`}
+            >
+              <Kanban className="h-3.5 w-3.5" /> Kanban View
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            Showing <span className="font-semibold text-foreground">{filteredProjects.length}</span> Total Projects
+          </div>
         </div>
       </div>
 
-      {/* 9-Cards Paginated Grid View */}
-      {filteredProjects.length === 0 ? (
+      {/* View Switcher: Kanban View vs 9-Cards Paginated Grid View */}
+      {viewMode === "kanban" ? (
+        <KanbanBoard
+          statuses={statuses}
+          onAddStatus={handleAddStatus}
+          onDeleteStatus={handleDeleteStatus}
+          projects={filteredProjects}
+          onSelectProject={setSelectedProject}
+          onUpdateStatus={handleUpdateProjectStatus}
+          renderProjectIcon={renderProjectIcon}
+          getStatusBadge={getStatusBadge}
+        />
+      ) : filteredProjects.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-12 text-center border border-dashed border-border rounded-xl bg-card">
           <Briefcase className="h-12 w-12 text-muted-foreground mb-3" />
           <h3 className="font-semibold text-lg text-foreground">No Projects Found</h3>
@@ -1072,7 +1268,7 @@ export function ProjectsView({
         open={!!selectedProject}
         onOpenChange={(open) => !open && setSelectedProject(null)}
       >
-        <SheetContent side="right" className="sm:max-w-md md:max-w-xl">
+        <SheetContent side="right" className="w-full sm:max-w-md md:max-w-xl max-h-[100vh] overflow-y-auto p-4 sm:p-6">
           {selectedProject && (() => {
             const metrics = calculateCostMetrics(selectedProject);
             const assignedList = Array.isArray(selectedProject.assignedEmployees)
@@ -1206,7 +1402,7 @@ export function ProjectsView({
 
       {/* ADD / EDIT PROJECT RIGHT-SIDE SHEET DRAWER FORM */}
       <Sheet open={showFormModal} onOpenChange={(open) => setShowFormModal(open)}>
-        <SheetContent side="right" className="sm:max-w-md md:max-w-xl">
+        <SheetContent side="right" className="w-full sm:max-w-md md:max-w-xl max-h-[100vh] overflow-y-auto p-4 sm:p-6">
           <SheetHeader>
             <SheetTitle>
               {editingProject ? "Edit Project Details" : "Add New Project"}
@@ -1400,14 +1596,15 @@ export function ProjectsView({
                 <select
                   id="status"
                   name="status"
-                  value={formData.status || "In Progress"}
+                  value={formData.status || statuses[0] || "In Progress"}
                   onChange={handleFormChange}
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
-                  <option value="In Progress">In Progress</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Completed">Completed</option>
-                  <option value="Delayed">Delayed</option>
+                  {statuses.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

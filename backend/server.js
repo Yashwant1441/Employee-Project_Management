@@ -397,7 +397,7 @@ app.post("/api/projects", requireAuth, async (req, res) => {
             language: language || "",
             extraRequirements: extraRequirements || "",
             deploymentLocation: deploymentLocation || "",
-            status: status || "In Progress",
+            status: status || "Pending",
             version: version || "1.0.0",
             userId
         });
@@ -449,7 +449,7 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
             language: language || "",
             extraRequirements: extraRequirements || "",
             deploymentLocation: deploymentLocation || "",
-            status: status || "In Progress",
+            status: status !== undefined ? status : "Pending",
             version: version || "1.0.0"
         };
 
@@ -487,6 +487,86 @@ app.delete("/api/projects/:id", requireAuth, async (req, res) => {
             message: "Failed to delete project",
             error: error.message
         });
+    }
+});
+
+// GET active user custom statuses
+app.get("/api/statuses", requireAuth, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+        const defaultStatuses = ["Pending", "In Progress", "Delayed", "Completed"];
+        if (!user || !user.customStatuses || user.customStatuses.length === 0) {
+            return res.json(defaultStatuses);
+        }
+        res.json(user.customStatuses);
+    } catch (error) {
+        res.status(500).json({ message: "Failed to fetch statuses", error: error.message });
+    }
+});
+
+// POST add a new custom status column
+app.post("/api/statuses", requireAuth, async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name || !name.trim()) {
+            return res.status(400).json({ message: "Status name is required" });
+        }
+        const trimmedName = name.trim();
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const currentStatuses = user.customStatuses && user.customStatuses.length > 0
+            ? user.customStatuses
+            : ["Pending", "In Progress", "Delayed", "Completed"];
+
+        if (currentStatuses.includes(trimmedName)) {
+            return res.status(400).json({ message: "Status already exists" });
+        }
+
+        user.customStatuses = [...currentStatuses, trimmedName];
+        await user.save();
+
+        res.json({ message: "Status added successfully", statuses: user.customStatuses });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to add status", error: error.message });
+    }
+});
+
+// DELETE a status column (reassigning existing projects)
+app.delete("/api/statuses/:name", requireAuth, async (req, res) => {
+    try {
+        const statusToDelete = decodeURIComponent(req.params.name);
+        const { targetStatus } = req.body || {};
+
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const currentStatuses = user.customStatuses && user.customStatuses.length > 0
+            ? user.customStatuses
+            : ["Pending", "In Progress", "Delayed", "Completed"];
+
+        if (currentStatuses.length <= 1) {
+            return res.status(400).json({ message: "Cannot delete the last remaining status column." });
+        }
+
+        // Filter out status to delete
+        user.customStatuses = currentStatuses.filter((s) => s !== statusToDelete);
+        await user.save();
+
+        // Reassign affected projects to targetStatus or fallback
+        const fallbackStatus = targetStatus || user.customStatuses[0] || "Pending";
+        await Project.updateMany(
+            { userId: req.userId, status: statusToDelete },
+            { $set: { status: fallbackStatus } }
+        );
+
+        res.json({
+            message: "Status deleted successfully",
+            statuses: user.customStatuses,
+            reassignedTo: fallbackStatus
+        });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to delete status", error: error.message });
     }
 });
 

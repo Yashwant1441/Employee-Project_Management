@@ -9,8 +9,12 @@ const userSchema = new mongoose.Schema({
     password: {
         type: String,
         required: true
+    },
+    customStatuses: {
+        type: [String],
+        default: ["Pending", "In Progress", "Delayed", "Completed"]
     }
-})
+});
 
 const User = mongoose.model("User", userSchema);
 

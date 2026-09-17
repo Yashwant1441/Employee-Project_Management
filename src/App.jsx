@@ -686,14 +686,14 @@ function App() {
           {/* Main Body Area */}
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
             {/* Top Navigation Header */}
-            <header className="flex h-16 items-center justify-between border-b border-border bg-card px-6">
-              <div className="flex items-center gap-3">
+            <header className="flex h-16 items-center justify-between border-b border-border bg-card px-3 sm:px-6">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                 <SidebarTrigger />
                 <div className="h-4 w-px bg-border hidden sm:block" />
-                <div className="flex items-center gap-2 text-sm font-medium">
+                <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-medium min-w-0 truncate">
                   <span className="text-muted-foreground hidden sm:inline">{companyInfo.name}</span>
                   <ChevronRight className="h-4 w-4 text-muted-foreground hidden sm:inline" />
-                  <span className="capitalize font-semibold text-foreground">
+                  <span className="capitalize font-semibold text-foreground truncate">
                     {activeTab === "home"
                       ? "Home Dashboard"
                       : activeTab === "projects"
@@ -703,15 +703,17 @@ function App() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
-                <Button variant="outline" size="sm" onClick={handleLogout} className="hidden sm:flex">
-                  <LogOut className="mr-2 h-4 w-4" /> Logout
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                <ModeToggle />
+                <Button variant="outline" size="sm" onClick={handleLogout} className="h-8 px-2.5 sm:px-3 text-xs">
+                  <LogOut className="h-3.5 w-3.5 sm:mr-2" />
+                  <span className="hidden sm:inline">Logout</span>
                 </Button>
               </div>
             </header>
 
             {/* Main Dynamic View Content */}
-            <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-6">
+            <main className="flex-1 overflow-y-auto p-3 sm:p-6 md:p-10 space-y-6">
 
               <Routes>
                 <Route
@@ -963,16 +965,17 @@ function App() {
                         </div>
                       ) : (
                         <>
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead className="w-[140px]">Employee ID</TableHead>
-                                <TableHead>Name</TableHead>
-                                <TableHead>Department</TableHead>
-                                <TableHead>Assign Projects</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
-                              </TableRow>
-                            </TableHeader>
+                          <div className="overflow-x-auto w-full border border-border/60 rounded-lg">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="w-[120px] sm:w-[140px]">Employee ID</TableHead>
+                                  <TableHead className="min-w-[140px]">Name</TableHead>
+                                  <TableHead className="min-w-[110px]">Department</TableHead>
+                                  <TableHead className="min-w-[200px]">Assign Projects</TableHead>
+                                  <TableHead className="text-right min-w-[140px]">Actions</TableHead>
+                                </TableRow>
+                              </TableHeader>
                             <TableBody>
                               {paginatedEmployees.map((employee) => {
                                 const employeeProjects = projects.filter((proj) =>
@@ -1053,6 +1056,7 @@ function App() {
                               })}
                             </TableBody>
                           </Table>
+                        </div>
 
                           {/* Pagination Controls */}
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-4 mt-4">
@@ -1126,7 +1130,7 @@ function App() {
 
         {/* Add / Edit Employee Right-Side Sheet Drawer */}
         <Sheet open={showAddForm} onOpenChange={(open) => setShowAddForm(open)}>
-          <SheetContent side="right" className="sm:max-w-md">
+          <SheetContent side="right" className="w-full sm:max-w-md max-h-[100vh] overflow-y-auto p-4 sm:p-6">
             <SheetHeader>
               <SheetTitle>
                 {editingEmployee ? "Edit Employee" : "Add Employee"}
@@ -1284,7 +1288,7 @@ function App() {
           open={!!deletingEmployee}
           onOpenChange={(open) => !open && setDeletingEmployee(null)}
         >
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="w-[92vw] sm:max-w-[425px] rounded-xl">
             <DialogHeader>
               <DialogTitle>Are you absolutely sure?</DialogTitle>
               <DialogDescription className="pt-1">
@@ -1316,7 +1320,7 @@ function App() {
             }
           }}
         >
-          <SheetContent side="right" className="sm:max-w-md md:max-w-lg">
+          <SheetContent side="right" className="w-full sm:max-w-md md:max-w-lg max-h-[100vh] overflow-y-auto p-4 sm:p-6">
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2">
                 <Briefcase className="h-5 w-5 text-primary" />
@@ -1428,11 +1432,11 @@ function App() {
 
   // Official shadcn/ui Login / Sign Up Card layout
   return (
-    <div className="relative flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-background text-foreground font-sans">
+    <div className="relative flex min-h-svh w-full items-center justify-center p-4 sm:p-6 md:p-10 bg-background text-foreground font-sans">
       <div className="absolute top-4 right-4">
         <ModeToggle />
       </div>
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-[92vw] sm:max-w-md shadow-xl border-border/60">
         <CardHeader>
           <CardTitle>{isSignUp ? "Create a new account" : "Login to your account"}</CardTitle>
           <CardDescription>
