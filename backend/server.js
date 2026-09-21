@@ -13,6 +13,7 @@ const Project = require("./models/Project");
 const ActivityLog = require("./models/ActivityLog");
 const { requireAuth, JWT_SECRET } = require("./middleware/auth");
 const upload = require("./middleware/upload");
+const documentUpload = require("./middleware/documentUpload");
 const multer = require("multer");
 const { uploadStream } = require("./config/cloudinary");
 
@@ -324,9 +325,16 @@ app.get("/api/projects", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
         const projects = await Project.find({ userId })
-            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation")
+            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation version documents")
             .sort({ endDate: 1 });
-        res.json(projects);
+
+        const user = await User.findById(userId);
+        const defaultStatuses = ["Pending", "In Progress", "Delayed", "Completed"];
+        const statuses = (user && user.customStatuses && user.customStatuses.length > 0)
+            ? user.customStatuses
+            : defaultStatuses;
+
+        res.json({ projects, statuses });
     } catch (error) {
         res.status(500).json({
             message: "Failed to fetch projects",
@@ -384,6 +392,12 @@ app.post("/api/projects", requireAuth, async (req, res) => {
             ? assignedEmployees
             : (typeof assignedEmployees === 'string' ? assignedEmployees.split(',').map(s => s.trim()).filter(Boolean) : []);
 
+        let uEmail = "System User";
+        try {
+            const u = await User.findById(userId);
+            if (u && u.email) uEmail = u.email;
+        } catch (e) {}
+
         const project = await Project.create({
             name,
             clientName,
@@ -400,26 +414,16 @@ app.post("/api/projects", requireAuth, async (req, res) => {
             deploymentLocation: deploymentLocation || "",
             status: status || "Pending",
             version: version || "1.0.0",
+            activities: [
+                {
+                    fromStatus: "Created",
+                    toStatus: status || "Pending",
+                    userEmail: uEmail,
+                    createdAt: new Date()
+                }
+            ],
             userId
         });
-
-        // Record initial creation activity log
-        try {
-            let uEmail = "System User";
-            const u = await User.findById(userId);
-            if (u && u.email) uEmail = u.email;
-
-            await ActivityLog.create({
-                projectId: project._id,
-                projectName: project.name,
-                fromStatus: "Created",
-                toStatus: project.status || "Pending",
-                userEmail: uEmail,
-                userId
-            });
-        } catch (e) {
-            console.error("Activity log creation error:", e.message);
-        }
 
         res.status(201).json(project);
     } catch (error) {
@@ -485,7 +489,7 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
             { new: true, runValidators: true }
         );
 
-        // Record ActivityLog if status changed
+        // Record activity directly in Project schema if status changed
         const newStatus = project.status;
         if (oldStatus !== newStatus) {
             try {
@@ -493,14 +497,14 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
                 const u = await User.findById(req.userId);
                 if (u && u.email) uEmail = u.email;
 
-                await ActivityLog.create({
-                    projectId: project._id,
-                    projectName: project.name,
+                project.activities = project.activities || [];
+                project.activities.push({
                     fromStatus: oldStatus,
                     toStatus: newStatus,
                     userEmail: uEmail,
-                    userId: req.userId
+                    createdAt: new Date()
                 });
+                await project.save();
             } catch (e) {
                 console.error("Activity log update error:", e.message);
             }
@@ -511,6 +515,151 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
         res.status(500).json({
             message: "Failed to update project",
             error: error.message
+        });
+    }
+});
+
+// Lightweight PATCH status endpoint (Drag & drop / Quick status changes)
+app.patch("/api/projects/:id/status", requireAuth, async (req, res) => {
+    try {
+        const { status } = req.body;
+        if (!status) {
+            return res.status(400).json({ message: "Status is required" });
+        }
+
+        const existingProject = await Project.findOne({ _id: req.params.id, userId: req.userId });
+        if (!existingProject) {
+            return res.status(404).json({ message: "Project not found or unauthorized" });
+        }
+
+        const oldStatus = existingProject.status || "Pending";
+        if (oldStatus !== status) {
+            existingProject.status = status;
+
+            try {
+                let uEmail = "System User";
+                const u = await User.findById(req.userId);
+                if (u && u.email) uEmail = u.email;
+
+                existingProject.activities = existingProject.activities || [];
+                existingProject.activities.push({
+                    fromStatus: oldStatus,
+                    toStatus: status,
+                    userEmail: uEmail,
+                    createdAt: new Date()
+                });
+            } catch (e) {
+                console.error("Activity log status update error:", e.message);
+            }
+
+            await existingProject.save();
+        }
+
+        // Return status & updated activities payload
+        res.json({
+            id: existingProject._id,
+            status: existingProject.status,
+            activities: existingProject.activities,
+            message: "Status updated successfully"
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to update project status",
+            error: error.message
+        });
+    }
+});
+
+// Upload documents & folders for a project
+app.post("/api/projects/:id/documents", requireAuth, documentUpload.array("files", 20), async (req, res) => {
+    try {
+        const project = await Project.findOne({ _id: req.params.id, userId: req.userId });
+        if (!project) {
+            return res.status(404).json({ message: "Project not found or unauthorized" });
+        }
+
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ message: "No document files provided." });
+        }
+
+        let folderPaths = [];
+        if (req.body.folderPaths) {
+            try {
+                folderPaths = typeof req.body.folderPaths === "string"
+                    ? JSON.parse(req.body.folderPaths)
+                    : req.body.folderPaths;
+            } catch (e) {
+                folderPaths = [];
+            }
+        }
+
+        let userEmail = "User";
+        try {
+            const u = await User.findById(req.userId);
+            if (u && u.email) userEmail = u.email;
+        } catch (e) { }
+
+        const newDocs = [];
+        for (let i = 0; i < req.files.length; i++) {
+            const file = req.files[i];
+            const rawPath = (Array.isArray(folderPaths) ? folderPaths[i] : "/") || "/";
+            const normalizedPath = rawPath.startsWith("/") ? rawPath : "/" + rawPath;
+
+            const uploadRes = await uploadStream(file.buffer, "project_documents");
+            const ext = file.originalname.split(".").pop().toLowerCase();
+
+            newDocs.push({
+                name: file.originalname,
+                fileUrl: uploadRes.secure_url,
+                fileType: ext,
+                size: file.size,
+                folderPath: normalizedPath,
+                public_id: uploadRes.public_id,
+                uploadedBy: userEmail,
+                uploadedAt: new Date(),
+            });
+        }
+
+        if (!project.documents) {
+            project.documents = [];
+        }
+        project.documents.push(...newDocs);
+        await project.save();
+
+        res.status(200).json({
+            message: "Documents uploaded successfully",
+            documents: project.documents,
+        });
+    } catch (error) {
+        console.error("Document upload error:", error);
+        res.status(500).json({
+            message: "Failed to upload project documents",
+            error: error.message,
+        });
+    }
+});
+
+// Delete a document from a project
+app.delete("/api/projects/:id/documents/:docId", requireAuth, async (req, res) => {
+    try {
+        const project = await Project.findOne({ _id: req.params.id, userId: req.userId });
+        if (!project) {
+            return res.status(404).json({ message: "Project not found or unauthorized" });
+        }
+
+        project.documents = (project.documents || []).filter(
+            (doc) => String(doc._id || doc.id) !== String(req.params.docId)
+        );
+        await project.save();
+
+        res.status(200).json({
+            message: "Document deleted successfully",
+            documents: project.documents,
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to delete document",
+            error: error.message,
         });
     }
 });

@@ -69,7 +69,13 @@ import {
   Terminal,
   Cpu,
   Folder,
+  FolderPlus,
+  FolderOpen,
+  File,
   Upload,
+  Download,
+  ExternalLink,
+  ArrowLeft,
   Loader2,
   Check,
   Bot,
@@ -408,6 +414,8 @@ function MultiSelectDropdown({
 export function ProjectsView({
   projects,
   setProjects,
+  statuses = ["Pending", "In Progress", "Delayed", "Completed"],
+  setStatuses,
   employees = [],
   currentUser = null,
 }) {
@@ -415,59 +423,207 @@ export function ProjectsView({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProject, setSelectedProject] = useState(null);
   const [viewMode, setViewMode] = useState("grid");
-  const [statuses, setStatuses] = useState(["Pending", "In Progress", "Delayed", "Completed"]);
+  const [activeFolder, setActiveFolder] = useState("/");
+  const [docSearchQuery, setDocSearchQuery] = useState("");
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+  const [customFolders, setCustomFolders] = useState([]);
+  const [deletingFolder, setDeletingFolder] = useState(null);
+  const [deletingDocument, setDeletingDocument] = useState(null);
   const [activities, setActivities] = useState([]);
   const [isLoadingActivities, setIsLoadingActivities] = useState(false);
+  const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
 
   useEffect(() => {
-    if (!selectedProject) {
+    if (selectedProject) {
+      setActivities(selectedProject.activities || []);
+    } else {
       setActivities([]);
-      return;
     }
-    const fetchActivities = async () => {
-      setIsLoadingActivities(true);
-      try {
-        const token = localStorage.getItem("app_token") || localStorage.getItem("token");
-        const projectId = selectedProject._id || selectedProject.id;
-        const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/activities`, {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setActivities(Array.isArray(data) ? data : []);
-        }
-      } catch (err) {
-        console.error("Failed to fetch activity logs:", err);
-      } finally {
-        setIsLoadingActivities(false);
-      }
-    };
-    fetchActivities();
   }, [selectedProject]);
 
-  useEffect(() => {
-    const fetchStatuses = async () => {
-      try {
-        const token = localStorage.getItem("app_token") || localStorage.getItem("token");
-        const response = await fetch(`${API_BASE_URL}/api/statuses`, {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data) && data.length > 0) {
-            setStatuses(data);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to fetch custom statuses:", err);
+  const formatFileSize = (bytes) => {
+    if (!bytes || isNaN(bytes) || bytes <= 0) return "0 KB";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  };
+
+  const getDocIcon = (fileType) => {
+    if (!fileType) return <FileText className="h-4 w-4 text-primary shrink-0" />;
+    const t = fileType.toLowerCase();
+    if (t === "pdf") return <FileText className="h-4 w-4 text-rose-500 shrink-0" />;
+    if (["png", "jpg", "jpeg", "webp", "gif", "svg"].includes(t))
+      return <FileText className="h-4 w-4 text-emerald-500 shrink-0" />;
+    if (["zip", "rar", "7z", "tar", "gz"].includes(t))
+      return <Package className="h-4 w-4 text-amber-500 shrink-0" />;
+    if (["js", "jsx", "ts", "tsx", "py", "html", "css", "json"].includes(t))
+      return <Code2 className="h-4 w-4 text-sky-500 shrink-0" />;
+    if (["doc", "docx"].includes(t))
+      return <FileText className="h-4 w-4 text-blue-500 shrink-0" />;
+    if (["xls", "xlsx", "csv"].includes(t))
+      return <Database className="h-4 w-4 text-green-500 shrink-0" />;
+    return <FileText className="h-4 w-4 text-primary shrink-0" />;
+  };
+
+  const handleUploadDocuments = async (filesList, relativeFolderPaths = []) => {
+    if (!selectedProject || !filesList || filesList.length === 0) return;
+    setIsUploadingDoc(true);
+
+    try {
+      const token = localStorage.getItem("app_token") || localStorage.getItem("token");
+      const targetId = selectedProject._id || selectedProject.id;
+      const uploadData = new FormData();
+
+      Array.from(filesList).forEach((file) => {
+        uploadData.append("files", file);
+      });
+
+      if (relativeFolderPaths && relativeFolderPaths.length > 0) {
+        uploadData.append("folderPaths", JSON.stringify(relativeFolderPaths));
       }
-    };
-    fetchStatuses();
-  }, []);
+
+      const res = await fetch(`${API_BASE_URL}/api/projects/${targetId}/documents`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: uploadData,
+      });
+
+      const data = await res.json();
+      if (res.ok && data.documents) {
+        const updatedDocs = data.documents;
+        setSelectedProject((prev) => ({ ...prev, documents: updatedDocs }));
+        setProjects((prevProjects) =>
+          prevProjects.map((p) =>
+            String(p.id || p._id) === String(targetId)
+              ? { ...p, documents: updatedDocs }
+              : p
+          )
+        );
+      }
+    } catch (err) {
+      console.error("Failed to upload documents:", err);
+    } finally {
+      setIsUploadingDoc(false);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const paths = Array.from(files).map(() => activeFolder);
+    handleUploadDocuments(files, paths);
+    e.target.value = "";
+  };
+
+  const handleFolderChange = (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const folderPaths = Array.from(files).map((file) => {
+      const relPath = file.webkitRelativePath || "";
+      const pathParts = relPath.split("/").slice(0, -1);
+      const folderRel = pathParts.join("/");
+      let fullPath = activeFolder === "/" ? "/" + folderRel : activeFolder + "/" + folderRel;
+      if (!fullPath.startsWith("/")) fullPath = "/" + fullPath;
+      return fullPath;
+    });
+
+    handleUploadDocuments(files, folderPaths);
+    e.target.value = "";
+  };
+
+  const confirmDeleteDocument = async () => {
+    if (!deletingDocument || !selectedProject) return;
+    const docId = deletingDocument.id;
+    const targetId = selectedProject._id || selectedProject.id;
+
+    setDeletingDocument(null);
+
+    const currentDocs = selectedProject.documents || [];
+    const updatedDocs = currentDocs.filter((d) => String(d._id || d.id) !== String(docId));
+    setSelectedProject((prev) => ({ ...prev, documents: updatedDocs }));
+    setProjects((prevProjects) =>
+      prevProjects.map((p) =>
+        String(p.id || p._id) === String(targetId) ? { ...p, documents: updatedDocs } : p
+      )
+    );
+
+    try {
+      const token = localStorage.getItem("app_token") || localStorage.getItem("token");
+      await fetch(`${API_BASE_URL}/api/projects/${targetId}/documents/${docId}`, {
+        method: "DELETE",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+    } catch (err) {
+      console.error("Failed to delete document:", err);
+    }
+  };
+
+  const handleCreateCustomFolder = (e) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    const folderTitle = newFolderName.trim().replace(/^\/+|\/+$/g, "");
+    let newPath = activeFolder === "/" ? "/" + folderTitle : activeFolder + "/" + folderTitle;
+    if (!customFolders.includes(newPath)) {
+      setCustomFolders((prev) => [...prev, newPath]);
+    }
+    setNewFolderName("");
+    setShowNewFolderModal(false);
+  };
+
+  const confirmDeleteFolder = async () => {
+    if (!deletingFolder || !selectedProject) return;
+    const { targetPath, docsInFolder } = deletingFolder;
+    const targetId = selectedProject._id || selectedProject.id;
+
+    setDeletingFolder(null);
+
+    // Remove from customFolders state
+    setCustomFolders((prev) =>
+      prev.filter((p) => p !== targetPath && !p.startsWith(targetPath + "/"))
+    );
+
+    // Filter out documents inside this folder tree locally
+    const currentDocs = selectedProject.documents || [];
+    const updatedDocs = currentDocs.filter(
+      (d) => !(d.folderPath === targetPath || (d.folderPath || "/").startsWith(targetPath + "/"))
+    );
+
+    setSelectedProject((prev) => ({ ...prev, documents: updatedDocs }));
+    setProjects((prevProjects) =>
+      prevProjects.map((p) =>
+        String(p.id || p._id) === String(targetId) ? { ...p, documents: updatedDocs } : p
+      )
+    );
+
+    // Delete matching documents from server
+    if (docsInFolder && docsInFolder.length > 0) {
+      for (const doc of docsInFolder) {
+        const docId = doc._id || doc.id;
+        try {
+          const token = localStorage.getItem("app_token") || localStorage.getItem("token");
+          await fetch(`${API_BASE_URL}/api/projects/${targetId}/documents/${docId}`, {
+            method: "DELETE",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+        } catch (err) {
+          console.error("Failed to delete document inside folder:", err);
+        }
+      }
+    }
+  };
+
+
 
   const handleAddStatus = async (newStatusName) => {
     if (!newStatusName) return;
@@ -553,16 +709,13 @@ export function ProjectsView({
     try {
       const token = localStorage.getItem("app_token") || localStorage.getItem("token");
       const targetId = targetProject._id || targetProject.id;
-      const response = await fetch(`${API_BASE_URL}/api/projects/${targetId}`, {
-        method: "PUT",
+      const response = await fetch(`${API_BASE_URL}/api/projects/${targetId}/status`, {
+        method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
-          ...targetProject,
-          status: newStatus,
-        }),
+        body: JSON.stringify({ status: newStatus }),
       });
 
       if (!response.ok) {
@@ -570,14 +723,14 @@ export function ProjectsView({
       }
 
       const updatedData = await response.json();
-      const finalProject = updatedData.project || updatedData;
+      const updatedStatus = updatedData.status || newStatus;
       setProjects((prevProjects) =>
         prevProjects.map((p) =>
-          String(p.id || p._id) === String(projectId) ? { ...p, ...finalProject } : p
+          String(p.id || p._id) === String(projectId) ? { ...p, status: updatedStatus } : p
         )
       );
       if (selectedProject && String(selectedProject.id || selectedProject._id) === String(projectId)) {
-        setSelectedProject((prev) => ({ ...prev, ...finalProject }));
+        setSelectedProject((prev) => ({ ...prev, status: updatedStatus }));
       }
     } catch (error) {
       console.error("Error updating project status:", error);
@@ -1108,7 +1261,7 @@ export function ProjectsView({
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 2xl:space-y-8 w-full max-w-[1920px] 2xl:max-w-none mx-auto">
       {/* Header Area */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-6">
         <div>
@@ -1208,7 +1361,7 @@ export function ProjectsView({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 3xl:grid-cols-5 gap-5 2xl:gap-7">
             {paginatedProjects.map((project) => (
               <Card
                 key={project.id || project._id}
@@ -1472,6 +1625,308 @@ export function ProjectsView({
                         No activity history logged for this project yet.
                       </div>
                     )}
+                  </div>
+
+                  {/* PROJECT DOCUMENTS & FOLDERS SECTION */}
+                  <div className="space-y-4 pt-4 border-t border-border">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                        <FolderOpen className="h-4 w-4 text-primary" /> Project Files & Folders ({selectedProject.documents?.length || 0})
+                      </div>
+
+                      {/* Upload Controls & Create Folder Buttons */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <input
+                          type="file"
+                          multiple
+                          ref={fileInputRef}
+                          onChange={handleFileChange}
+                          className="hidden"
+                        />
+                        <input
+                          type="file"
+                          webkitdirectory=""
+                          directory=""
+                          multiple
+                          ref={folderInputRef}
+                          onChange={handleFolderChange}
+                          className="hidden"
+                        />
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={isUploadingDoc}
+                          onClick={() => fileInputRef.current?.click()}
+                          className="h-7 text-xs px-2 gap-1 text-foreground"
+                        >
+                          <Upload className="h-3 w-3 text-primary" /> Upload File
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={isUploadingDoc}
+                          onClick={() => folderInputRef.current?.click()}
+                          className="h-7 text-xs px-2 gap-1 text-foreground"
+                        >
+                          <FolderPlus className="h-3 w-3 text-amber-500" /> Upload Folder
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setShowNewFolderModal(true)}
+                          className="h-7 text-xs px-2 gap-1 text-muted-foreground hover:text-foreground"
+                        >
+                          <Plus className="h-3 w-3" /> New Folder
+                        </Button>
+                      </div>
+                    </div>
+
+                    {isUploadingDoc && (
+                      <div className="flex items-center justify-center p-3 rounded-lg bg-primary/10 border border-primary/20 text-xs text-primary font-medium gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                        Uploading documents to Cloudinary storage...
+                      </div>
+                    )}
+
+                    {/* Breadcrumb Folder Bar */}
+                    <div className="flex items-center justify-between gap-2 bg-muted/40 p-2.5 rounded-lg border border-border/60 text-xs">
+                      <div className="flex items-center gap-1 overflow-x-auto min-w-0 flex-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setActiveFolder("/")}
+                          className={`h-6 px-2 text-xs font-semibold ${activeFolder === "/" ? "bg-background text-primary" : "text-muted-foreground"}`}
+                        >
+                          <Folder className="h-3.5 w-3.5 mr-1 text-amber-500" /> Root
+                        </Button>
+
+                        {activeFolder !== "/" &&
+                          activeFolder
+                            .split("/")
+                            .filter(Boolean)
+                            .map((folderSegment, idx, arr) => {
+                              const buildPath = "/" + arr.slice(0, idx + 1).join("/");
+                              const isLast = idx === arr.length - 1;
+                              return (
+                                <React.Fragment key={buildPath}>
+                                  <span className="text-muted-foreground font-mono">/</span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setActiveFolder(buildPath)}
+                                    className={`h-6 px-1.5 text-xs font-medium max-w-[120px] truncate ${isLast ? "bg-background font-bold text-foreground" : "text-muted-foreground"}`}
+                                  >
+                                    {folderSegment}
+                                  </Button>
+                                </React.Fragment>
+                              );
+                            })}
+                      </div>
+
+                      {activeFolder !== "/" && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            const parts = activeFolder.split("/").filter(Boolean);
+                            parts.pop();
+                            const parent = parts.length === 0 ? "/" : "/" + parts.join("/");
+                            setActiveFolder(parent);
+                          }}
+                          className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground shrink-0 gap-1"
+                        >
+                          <ArrowLeft className="h-3 w-3" /> Back
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Document Search Bar */}
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        type="text"
+                        placeholder={`Search in ${activeFolder === "/" ? "Root" : activeFolder}...`}
+                        value={docSearchQuery}
+                        onChange={(e) => setDocSearchQuery(e.target.value)}
+                        className="pl-8 h-8 text-xs bg-background"
+                      />
+                    </div>
+
+                    {/* Folders & Documents Explorer Grid */}
+                    {(() => {
+                      const allDocs = selectedProject.documents || [];
+
+                      const subfolderNames = Array.from(
+                        new Set([
+                          ...customFolders
+                            .filter((fPath) => {
+                              if (fPath === activeFolder) return false;
+                              if (activeFolder === "/") {
+                                return fPath.startsWith("/") && fPath.split("/").filter(Boolean).length === 1;
+                              }
+                              return (
+                                fPath.startsWith(activeFolder + "/") &&
+                                fPath.slice(activeFolder.length + 1).split("/").filter(Boolean).length === 1
+                              );
+                            })
+                            .map((fPath) => {
+                              const remaining = activeFolder === "/" ? fPath.slice(1) : fPath.slice(activeFolder.length + 1);
+                              return remaining.split("/")[0];
+                            }),
+
+                          ...allDocs
+                            .map((d) => d.folderPath || "/")
+                            .filter((fPath) => {
+                              if (fPath === activeFolder) return false;
+                              if (activeFolder === "/") {
+                                return fPath.startsWith("/") && fPath.split("/").filter(Boolean).length >= 1;
+                              }
+                              return fPath.startsWith(activeFolder + "/");
+                            })
+                            .map((fPath) => {
+                              const remaining = activeFolder === "/" ? fPath.slice(1) : fPath.slice(activeFolder.length + 1);
+                              return remaining.split("/")[0];
+                            })
+                            .filter(Boolean),
+                        ])
+                      );
+
+                      const currentDocs = allDocs.filter((doc) => {
+                        const dPath = doc.folderPath || "/";
+                        const matchesPath = dPath === activeFolder;
+                        if (!matchesPath) return false;
+                        if (!docSearchQuery.trim()) return true;
+                        return doc.name.toLowerCase().includes(docSearchQuery.trim().toLowerCase());
+                      });
+
+                      const hasItems = subfolderNames.length > 0 || currentDocs.length > 0;
+
+                      return !hasItems ? (
+                        <div className="p-6 rounded-xl bg-muted/20 border border-dashed border-border/70 text-center space-y-1">
+                          <Folder className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {docSearchQuery
+                              ? `No files matching "${docSearchQuery}"`
+                              : `This folder (${activeFolder}) is empty.`}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground/70">
+                            Upload documents or folders to attach assets to this project.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {/* Render Subfolders */}
+                          {subfolderNames.length > 0 && (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {subfolderNames.map((folderName) => {
+                                const targetPath = activeFolder === "/" ? "/" + folderName : activeFolder + "/" + folderName;
+                                const docsInSubfolder = allDocs.filter((d) => (d.folderPath || "/").startsWith(targetPath));
+
+                                return (
+                                  <div
+                                    key={folderName}
+                                    onClick={() => setActiveFolder(targetPath)}
+                                    className="p-2.5 rounded-lg border border-border bg-card hover:border-amber-500/50 hover:bg-amber-500/5 cursor-pointer transition-all flex items-center justify-between group"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <Folder className="h-4 w-4 text-amber-500 shrink-0 group-hover:scale-110 transition-transform" />
+                                      <span className="text-xs font-semibold text-foreground truncate max-w-[100px]">
+                                        {folderName}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-mono">
+                                        {docsInSubfolder.length}
+                                      </Badge>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        title={`Delete folder "${folderName}"`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDeletingFolder({ targetPath, folderName, docsInFolder: docsInSubfolder });
+                                        }}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Render Documents File List */}
+                          {currentDocs.length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              {currentDocs.map((doc) => {
+                                const docId = doc._id || doc.id;
+                                return (
+                                  <div
+                                    key={docId}
+                                    className="p-2.5 rounded-lg border border-border/80 bg-card hover:bg-muted/40 transition-colors flex items-center justify-between gap-3 group"
+                                  >
+                                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                      <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                                        {getDocIcon(doc.fileType)}
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-xs font-semibold text-foreground line-clamp-1">
+                                          {doc.name}
+                                        </div>
+                                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+                                          <span className="font-mono">{formatFileSize(doc.size)}</span>
+                                          <span>•</span>
+                                          <span className="uppercase font-bold text-primary/80">{doc.fileType || "file"}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <a
+                                        href={doc.fileUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        download
+                                      >
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7 text-muted-foreground hover:text-primary"
+                                        >
+                                          <Download className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </a>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => setDeletingDocument({ id: docId, name: doc.name })}
+                                        className="h-7 w-7 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -1990,6 +2445,109 @@ export function ProjectsView({
               Delete Project
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DELETE FOLDER CONFIRMATION MODAL */}
+      <Dialog
+        open={!!deletingFolder}
+        onOpenChange={(open) => !open && setDeletingFolder(null)}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Folder Deletion</DialogTitle>
+            <DialogDescription className="pt-1">
+              Are you sure you want to delete folder{" "}
+              <span className="font-semibold text-foreground">
+                "{deletingFolder?.folderName}"
+              </span>
+              {deletingFolder?.docsInFolder?.length > 0 ? (
+                <> and all <span className="font-semibold text-foreground">{deletingFolder.docsInFolder.length}</span> item(s) inside it?</>
+              ) : (
+                "?"
+              )}{" "}
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeletingFolder(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteFolder}>
+              Delete Folder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DELETE DOCUMENT CONFIRMATION MODAL */}
+      <Dialog
+        open={!!deletingDocument}
+        onOpenChange={(open) => !open && setDeletingDocument(null)}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Document Deletion</DialogTitle>
+            <DialogDescription className="pt-1">
+              Are you sure you want to delete document{" "}
+              <span className="font-semibold text-foreground">
+                "{deletingDocument?.name}"
+              </span>
+              ? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeletingDocument(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteDocument}>
+              Delete Document
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* NEW FOLDER MODAL */}
+      <Dialog
+        open={showNewFolderModal}
+        onOpenChange={(open) => {
+          setShowNewFolderModal(open);
+          if (!open) setNewFolderName("");
+        }}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Create New Folder</DialogTitle>
+            <DialogDescription className="pt-1">
+              Enter a name for the new folder in{" "}
+              <span className="font-semibold text-foreground">{activeFolder}</span>:
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateCustomFolder} className="space-y-4 pt-2">
+            <div>
+              <Input
+                placeholder="Folder Name (e.g. Invoices, Wireframes)"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowNewFolderModal(false);
+                  setNewFolderName("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!newFolderName.trim()}>
+                Create Folder
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

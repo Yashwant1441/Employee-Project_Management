@@ -135,6 +135,7 @@ function App() {
   });
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [statuses, setStatuses] = useState(["Pending", "In Progress", "Delayed", "Completed"]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [employeeId, setEmployeeId] = useState("");
   const [name, setName] = useState("");
@@ -242,7 +243,12 @@ function App() {
           headers: authHeaders,
         });
         const data = await response.json();
-        if (Array.isArray(data)) {
+        if (data && Array.isArray(data.projects)) {
+          setProjects(data.projects);
+          if (Array.isArray(data.statuses) && data.statuses.length > 0) {
+            setStatuses(data.statuses);
+          }
+        } else if (Array.isArray(data)) {
           setProjects(data);
         } else {
           setProjects([]);
@@ -713,13 +719,13 @@ function App() {
             </header>
 
             {/* Main Dynamic View Content */}
-            <main className="flex-1 overflow-y-auto p-3 sm:p-6 md:p-10 space-y-6">
+            <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 2xl:p-12 3xl:p-16 space-y-6 2xl:space-y-8 w-full max-w-[1920px] 2xl:max-w-none mx-auto">
 
               <Routes>
                 <Route
                   path="/"
                   element={
-                <div className="space-y-8 max-w-5xl mx-auto">
+                <div className="space-y-8 2xl:space-y-10 w-full max-w-[1920px] 2xl:max-w-none mx-auto">
                   {/* Hero Header */}
                   <div className="rounded-2xl border border-border bg-card p-6 md:p-8 shadow-xs relative overflow-hidden">
                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
@@ -751,7 +757,7 @@ function App() {
                   {/* Main Metric Cards: Total Employees & Projects */}
                   <div>
                     <h2 className="text-lg font-bold mb-4 tracking-tight">Organization Metrics</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 2xl:grid-cols-3 gap-6 2xl:gap-8">
 
                       {/* Stat Card: Employees */}
                       <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => navigate("/employees")}>
@@ -885,6 +891,8 @@ function App() {
                 <ProjectsView
                   projects={projects}
                   setProjects={setProjects}
+                  statuses={statuses}
+                  setStatuses={setStatuses}
                   employees={employees}
                   currentUser={currentUser}
                 />
@@ -895,7 +903,7 @@ function App() {
             <Route
               path="/employees"
               element={
-                <div className="space-y-6 max-w-7xl mx-auto">
+                <div className="space-y-6 2xl:space-y-8 w-full max-w-[1920px] 2xl:max-w-none mx-auto">
                   {/* Header Bar */}
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-6">
                     <div>

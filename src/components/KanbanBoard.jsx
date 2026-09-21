@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import ReactDOM from "react-dom";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import {
   Card,
@@ -154,9 +155,9 @@ export function KanbanBoard({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full">
       <DragDropContext onDragEnd={handleDragEnd}>
-        <div className="flex gap-5 overflow-x-auto pb-6 pt-1 items-start min-h-[500px]">
+        <div className="flex gap-5 2xl:gap-6 overflow-x-auto pb-6 pt-1 items-start min-h-[550px] 2xl:min-h-[660px]">
           {statuses.map((statusName, colIdx) => {
             const column = getColumnConfig(statusName, colIdx);
             const columnProjects = projects.filter(
@@ -167,10 +168,10 @@ export function KanbanBoard({
             return (
               <div
                 key={column.id}
-                className={`w-80 shrink-0 flex flex-col rounded-xl border border-border bg-card/60 backdrop-blur-sm overflow-hidden shadow-sm`}
+                className={`w-80 2xl:w-88 3xl:w-96 shrink-0 flex flex-col rounded-xl border border-border bg-card/60 backdrop-blur-sm shadow-sm`}
               >
                 {/* Column Header */}
-                <div className="p-3.5 border-b border-border/70 flex items-center justify-between bg-muted/40">
+                <div className="p-3.5 border-b border-border/70 flex items-center justify-between bg-muted/40 rounded-t-xl">
                   <div className="flex items-center gap-2 min-w-0">
                     <ColumnIcon className={`h-4 w-4 shrink-0 ${column.accentColor}`} />
                     <h3 className="font-bold text-sm tracking-tight text-foreground truncate">
@@ -222,7 +223,7 @@ export function KanbanBoard({
                     <div
                       ref={provided.innerRef}
                       {...provided.droppableProps}
-                      className={`p-3 min-h-[420px] flex flex-col gap-3 transition-colors duration-200 ${snapshot.isDraggingOver
+                      className={`p-3 min-h-[460px] 2xl:min-h-[560px] flex flex-col gap-3 transition-colors duration-200 ${snapshot.isDraggingOver
                         ? "bg-primary/5 ring-2 ring-primary/20 ring-inset rounded-b-xl"
                         : ""
                         }`}
@@ -243,124 +244,135 @@ export function KanbanBoard({
                               draggableId={projectId}
                               index={index}
                             >
-                              {(provided, snapshot) => (
-                                <div
-                                  ref={provided.innerRef}
-                                  {...provided.draggableProps}
-                                  {...provided.dragHandleProps}
-                                  className={`group relative rounded-xl border border-border bg-card transition-all duration-200 ${snapshot.isDragging
-                                    ? "shadow-2xl ring-2 ring-primary border-primary scale-[1.03] z-50 bg-card"
-                                    : "hover:border-primary/50 hover:shadow-md"
-                                    }`}
-                                >
-                                  <Card className="border-0 shadow-none bg-transparent">
-                                    <CardHeader className="p-4 pb-2">
-                                      <div className="flex items-start justify-between gap-2">
-                                        <div className="flex items-center gap-2.5 min-w-0">
-                                          <div className="h-9 w-9 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold border border-primary/20 group-hover:bg-primary group-hover:text-primary-foreground transition-all overflow-hidden">
-                                            {renderProjectIcon
-                                              ? renderProjectIcon(project.icon, "h-4 w-4")
-                                              : null}
-                                          </div>
-                                          <div className="min-w-0">
-                                            <h4
-                                              onClick={() => onSelectProject && onSelectProject(project)}
-                                              className="font-bold text-sm text-foreground line-clamp-1 hover:text-primary cursor-pointer transition-colors"
-                                            >
-                                              {project.name}
-                                            </h4>
-                                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                              <Building2 className="h-3 w-3 shrink-0" />
-                                              <span className="truncate">{project.clientName}</span>
-                                            </div>
-                                          </div>
-                                        </div>
+                              {(provided, snapshot) => {
+                                const usePortal = snapshot.isDragging;
 
-                                        {/* Quick Status Dropdown Menu */}
-                                        <DropdownMenu>
-                                          <DropdownMenuTrigger asChild>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0 -mr-1"
-                                              onClick={(e) => e.stopPropagation()}
-                                            >
-                                              <MoreVertical className="h-3.5 w-3.5" />
-                                            </Button>
-                                          </DropdownMenuTrigger>
-                                          <DropdownMenuContent align="end" className="w-44">
-                                            <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                                              Move Status
+                                const itemContent = (
+                                  <div
+                                    ref={provided.innerRef}
+                                    {...provided.draggableProps}
+                                    {...provided.dragHandleProps}
+                                    style={provided.draggableProps.style}
+                                    className={`group relative rounded-xl border border-border bg-card ${snapshot.isDragging
+                                      ? "shadow-2xl ring-2 ring-primary border-primary z-[9999] bg-card select-none"
+                                      : "hover:border-primary/50 hover:shadow-md transition-all duration-200"
+                                      }`}
+                                  >
+                                    <Card className="border-0 shadow-none bg-transparent">
+                                      <CardHeader className="p-4 pb-2">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="flex items-center gap-2.5 min-w-0">
+                                            <div className="h-9 w-9 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold border border-primary/20 group-hover:bg-primary group-hover:text-primary-foreground transition-all overflow-hidden">
+                                              {renderProjectIcon
+                                                ? renderProjectIcon(project.icon, "h-4 w-4")
+                                                : null}
                                             </div>
-                                            {statuses.map((colName) => (
-                                              <DropdownMenuItem
-                                                key={colName}
-                                                disabled={colName === column.id}
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  if (onUpdateStatus) {
-                                                    onUpdateStatus(projectId, colName);
-                                                  }
-                                                }}
-                                                className="text-xs cursor-pointer flex items-center gap-2"
+                                            <div className="min-w-0">
+                                              <h4
+                                                onClick={() => onSelectProject && onSelectProject(project)}
+                                                className="font-bold text-sm text-foreground line-clamp-1 hover:text-primary cursor-pointer transition-colors"
                                               >
-                                                <Layers className="h-3.5 w-3.5 text-primary" />
-                                                {colName}
-                                              </DropdownMenuItem>
-                                            ))}
-                                          </DropdownMenuContent>
-                                        </DropdownMenu>
-                                      </div>
-                                    </CardHeader>
+                                                {project.name}
+                                              </h4>
+                                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                <Building2 className="h-3 w-3 shrink-0" />
+                                                <span className="truncate">{project.clientName}</span>
+                                              </div>
+                                            </div>
+                                          </div>
 
-                                    <CardContent className="px-4 pb-4 pt-1">
-                                      {/* Tech Badges */}
-                                      <div className="flex items-center gap-1.5 flex-wrap my-2.5">
-                                        {project.language && (
-                                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal flex items-center gap-1 bg-muted">
-                                            <Code2 className="h-2.5 w-2.5 text-primary" />
-                                            {project.language}
-                                          </Badge>
-                                        )}
-                                        {project.database && (
-                                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal flex items-center gap-1 bg-muted">
-                                            <Database className="h-2.5 w-2.5 text-emerald-500" />
-                                            {project.database}
-                                          </Badge>
-                                        )}
-                                        {project.deploymentLocation && (
-                                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal flex items-center gap-1 bg-muted">
-                                            <Cloud className="h-2.5 w-2.5 text-sky-500" />
-                                            {project.deploymentLocation}
-                                          </Badge>
-                                        )}
-                                      </div>
+                                          {/* Quick Status Dropdown Menu */}
+                                          <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                              <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0 -mr-1"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                <MoreVertical className="h-3.5 w-3.5" />
+                                              </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="w-44">
+                                              <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                                Move Status
+                                              </div>
+                                              {statuses.map((colName) => (
+                                                <DropdownMenuItem
+                                                  key={colName}
+                                                  disabled={colName === column.id}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (onUpdateStatus) {
+                                                      onUpdateStatus(projectId, colName);
+                                                    }
+                                                  }}
+                                                  className="text-xs cursor-pointer flex items-center gap-2"
+                                                >
+                                                  <Layers className="h-3.5 w-3.5 text-primary" />
+                                                  {colName}
+                                                </DropdownMenuItem>
+                                              ))}
+                                            </DropdownMenuContent>
+                                          </DropdownMenu>
+                                        </div>
+                                      </CardHeader>
 
-                                      {/* Project Footer */}
-                                      <div className="pt-2 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
-                                        <div className="flex items-center gap-1.5">
-                                          <Users className="h-3.5 w-3.5 text-primary" />
-                                          <span className="font-medium text-[11px]">
-                                            {project.employeeCount || (Array.isArray(project.assignedEmployees) ? project.assignedEmployees.length : 1)} assigned
-                                          </span>
+                                      <CardContent className="px-4 pb-4 pt-1">
+                                        {/* Tech Badges */}
+                                        <div className="flex items-center gap-1.5 flex-wrap my-2.5">
+                                          {project.language && (
+                                            <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal flex items-center gap-1 bg-muted">
+                                              <Code2 className="h-2.5 w-2.5 text-primary" />
+                                              {project.language}
+                                            </Badge>
+                                          )}
+                                          {project.database && (
+                                            <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal flex items-center gap-1 bg-muted">
+                                              <Database className="h-2.5 w-2.5 text-emerald-500" />
+                                              {project.database}
+                                            </Badge>
+                                          )}
+                                          {project.deploymentLocation && (
+                                            <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal flex items-center gap-1 bg-muted">
+                                              <Cloud className="h-2.5 w-2.5 text-sky-500" />
+                                              {project.deploymentLocation}
+                                            </Badge>
+                                          )}
                                         </div>
 
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (onSelectProject) onSelectProject(project);
-                                          }}
-                                          className="h-6 px-2 text-[11px] text-muted-foreground hover:text-primary gap-1"
-                                        >
-                                          <Maximize2 className="h-3 w-3" /> Details
-                                        </Button>
-                                      </div>
-                                    </CardContent>
-                                  </Card>
-                                </div>
-                              )}
+                                        {/* Project Footer */}
+                                        <div className="pt-2 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
+                                          <div className="flex items-center gap-1.5">
+                                            <Users className="h-3.5 w-3.5 text-primary" />
+                                            <span className="font-medium text-[11px]">
+                                              {project.employeeCount || (Array.isArray(project.assignedEmployees) ? project.assignedEmployees.length : 1)} assigned
+                                            </span>
+                                          </div>
+
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (onSelectProject) onSelectProject(project);
+                                            }}
+                                            className="h-6 px-2 text-[11px] text-muted-foreground hover:text-primary gap-1"
+                                          >
+                                            <Maximize2 className="h-3 w-3" /> Details
+                                          </Button>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  </div>
+                                );
+
+                                if (usePortal) {
+                                  return ReactDOM.createPortal(itemContent, document.body);
+                                }
+
+                                return itemContent;
+                              }}
                             </Draggable>
                           );
                         })
@@ -374,7 +386,7 @@ export function KanbanBoard({
           })}
 
           {/* Add New Column Button Container */}
-          <div className="w-72 shrink-0">
+          <div className="w-80 2xl:w-88 3xl:w-96 shrink-0">
             <Button
               variant="outline"
               onClick={() => {

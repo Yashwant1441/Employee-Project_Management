@@ -62,6 +62,26 @@ const projectSchema = new mongoose.Schema(
       type: String,
       default: "1.0.0",
     },
+    documents: [
+      {
+        name: { type: String, required: true },
+        fileUrl: { type: String, required: true },
+        fileType: { type: String, default: "" },
+        size: { type: Number, default: 0 },
+        folderPath: { type: String, default: "/" },
+        public_id: { type: String, default: "" },
+        uploadedBy: { type: String, default: "" },
+        uploadedAt: { type: Date, default: Date.now },
+      },
+    ],
+    activities: [
+      {
+        fromStatus: { type: String, default: "" },
+        toStatus: { type: String, default: "" },
+        userEmail: { type: String, default: "System User" },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
