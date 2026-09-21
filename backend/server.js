@@ -325,7 +325,7 @@ app.get("/api/projects", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
         const projects = await Project.find({ userId })
-            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation version documents")
+            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation version documents activities")
             .sort({ endDate: 1 });
 
         const user = await User.findById(userId);

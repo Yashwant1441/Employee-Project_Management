@@ -699,12 +699,31 @@ export function ProjectsView({
     const oldStatus = targetProject.status || "In Progress";
     if (oldStatus === newStatus) return;
 
-    // Optimistically update React state
+    const optimisticActivity = {
+      fromStatus: oldStatus,
+      toStatus: newStatus,
+      userEmail: currentUser?.email || "System User",
+      createdAt: new Date().toISOString(),
+    };
+    const optimisticActivities = [...(targetProject.activities || []), optimisticActivity];
+
+    // Optimistically update React state (both status AND activities)
     setProjects((prevProjects) =>
       prevProjects.map((p) =>
-        String(p.id || p._id) === String(projectId) ? { ...p, status: newStatus } : p
+        String(p.id || p._id) === String(projectId)
+          ? { ...p, status: newStatus, activities: optimisticActivities }
+          : p
       )
     );
+
+    if (selectedProject && String(selectedProject.id || selectedProject._id) === String(projectId)) {
+      setSelectedProject((prev) => ({
+        ...prev,
+        status: newStatus,
+        activities: optimisticActivities,
+      }));
+      setActivities(optimisticActivities);
+    }
 
     try {
       const token = localStorage.getItem("app_token") || localStorage.getItem("token");
@@ -724,22 +743,42 @@ export function ProjectsView({
 
       const updatedData = await response.json();
       const updatedStatus = updatedData.status || newStatus;
+      const updatedActivities = updatedData.activities || optimisticActivities;
+
       setProjects((prevProjects) =>
         prevProjects.map((p) =>
-          String(p.id || p._id) === String(projectId) ? { ...p, status: updatedStatus } : p
+          String(p.id || p._id) === String(projectId)
+            ? { ...p, status: updatedStatus, activities: updatedActivities }
+            : p
         )
       );
+
       if (selectedProject && String(selectedProject.id || selectedProject._id) === String(projectId)) {
-        setSelectedProject((prev) => ({ ...prev, status: updatedStatus }));
+        setSelectedProject((prev) => ({
+          ...prev,
+          status: updatedStatus,
+          activities: updatedActivities,
+        }));
+        setActivities(updatedActivities);
       }
     } catch (error) {
       console.error("Error updating project status:", error);
       // Revert status on failure
       setProjects((prevProjects) =>
         prevProjects.map((p) =>
-          String(p.id || p._id) === String(projectId) ? { ...p, status: oldStatus } : p
+          String(p.id || p._id) === String(projectId)
+            ? { ...p, status: oldStatus, activities: targetProject.activities || [] }
+            : p
         )
       );
+      if (selectedProject && String(selectedProject.id || selectedProject._id) === String(projectId)) {
+        setSelectedProject((prev) => ({
+          ...prev,
+          status: oldStatus,
+          activities: targetProject.activities || [],
+        }));
+        setActivities(targetProject.activities || []);
+      }
       setNotificationModal({
         isOpen: true,
         title: "Status Update Failed",
