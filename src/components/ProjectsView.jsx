@@ -444,21 +444,13 @@ export function ProjectsView({
     }
   }, [selectedProject]);
 
-  const allProjectsRef = useRef([]);
+  const prevProjSearchRef = useRef("");
 
   useEffect(() => {
-    if (projects.length > 0 && !searchQuery.trim()) {
-      allProjectsRef.current = projects;
-    }
-  }, [projects, searchQuery]);
+    if (!searchQuery.trim() && !prevProjSearchRef.current) return;
 
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      if (allProjectsRef.current.length > 0) {
-        setProjects(allProjectsRef.current);
-      }
-      return;
-    }
+    const isClearing = !searchQuery.trim() && prevProjSearchRef.current;
+    prevProjSearchRef.current = searchQuery.trim();
 
     const controller = new AbortController();
 
@@ -470,7 +462,9 @@ export function ProjectsView({
       };
 
       try {
-        const url = `${API_BASE_URL}/api/projects?search=${encodeURIComponent(searchQuery.trim())}`;
+        const url = searchQuery.trim()
+          ? `${API_BASE_URL}/api/projects?search=${encodeURIComponent(searchQuery.trim())}`
+          : `${API_BASE_URL}/api/projects`;
 
         const res = await fetch(url, {
           headers: authHeaders,
@@ -485,7 +479,7 @@ export function ProjectsView({
           console.error("Failed to search projects:", err);
         }
       }
-    }, 1000);
+    }, isClearing ? 0 : 1000);
 
     return () => {
       clearTimeout(timer);

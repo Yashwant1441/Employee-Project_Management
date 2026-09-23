@@ -306,15 +306,15 @@ function App() {
     }
   }, [isLoggedIn, currentUser, activeTab, hasFetchedEmployees, hasFetchedProjects]);
 
+  const prevEmpSearchRef = useRef("");
+
   useEffect(() => {
     if (!isLoggedIn || !hasFetchedEmployees) return;
 
-    if (!searchQuery.trim()) {
-      if (allEmployeesRef.current.length > 0) {
-        setEmployees(allEmployeesRef.current);
-      }
-      return;
-    }
+    if (!searchQuery.trim() && !prevEmpSearchRef.current) return;
+
+    const isClearing = !searchQuery.trim() && prevEmpSearchRef.current;
+    prevEmpSearchRef.current = searchQuery.trim();
 
     const controller = new AbortController();
 
@@ -326,7 +326,9 @@ function App() {
       };
 
       try {
-        const url = `${API_BASE_URL}/api/employees?search=${encodeURIComponent(searchQuery.trim())}`;
+        const url = searchQuery.trim()
+          ? `${API_BASE_URL}/api/employees?search=${encodeURIComponent(searchQuery.trim())}`
+          : `${API_BASE_URL}/api/employees`;
 
         const response = await fetch(url, {
           headers: authHeaders,
@@ -341,7 +343,7 @@ function App() {
           console.log("Failed to search employees:", error);
         }
       }
-    }, 1000);
+    }, isClearing ? 0 : 1000);
 
     return () => {
       clearTimeout(timer);
@@ -498,7 +500,16 @@ function App() {
         return;
       }
 
-      setEmployees((previousEmployees) => [...previousEmployees, data]);
+      const newEmployee = {
+        id: data.id || data._id,
+        employeeId: finalEmployeeId,
+        name,
+        department,
+        avatar: avatar || "",
+        assignedProjects: [],
+      };
+
+      setEmployees((previousEmployees) => [...previousEmployees, newEmployee]);
       setCounts((prev) => {
         const updated = { ...prev, totalEmployees: prev.totalEmployees + 1 };
         try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
