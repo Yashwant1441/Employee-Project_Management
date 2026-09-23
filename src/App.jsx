@@ -1,6 +1,6 @@
 import "./App.css";
 import API_BASE_URL from "./api";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -133,6 +133,16 @@ function App() {
       return false;
     }
   });
+  const [counts, setCounts] = useState(() => {
+    try {
+      const saved = localStorage.getItem("app_counts");
+      return saved ? JSON.parse(saved) : { totalEmployees: 0, totalProjects: 0 };
+    } catch (e) {
+      return { totalEmployees: 0, totalProjects: 0 };
+    }
+  });
+  const [hasFetchedEmployees, setHasFetchedEmployees] = useState(false);
+  const [hasFetchedProjects, setHasFetchedProjects] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
   const [statuses, setStatuses] = useState(["Pending", "In Progress", "Delayed", "Completed"]);
@@ -197,8 +207,11 @@ function App() {
     const nameMatch = employee.name && employee.name.toLowerCase().includes(q);
     const idMatch = employee.employeeId && employee.employeeId.toLowerCase().includes(q);
 
-    const assignedProjects = projects.filter((proj) => isEmployeeAssigned(proj, employee));
-    const projectMatch = assignedProjects.some((proj) => {
+    const empProjects = (employee.assignedProjects && employee.assignedProjects.length > 0)
+      ? employee.assignedProjects
+      : projects.filter((proj) => isEmployeeAssigned(proj, employee));
+
+    const projectMatch = empProjects.some((proj) => {
       const projNameMatch = proj.name && proj.name.toLowerCase().includes(q);
       const projIdMatch = (proj.projectId || proj.id || proj._id || "").toString().toLowerCase().includes(q);
       return projNameMatch || projIdMatch;
@@ -213,6 +226,8 @@ function App() {
     startIndex,
     startIndex + itemsPerPage
   );
+
+  const allEmployeesRef = useRef([]);
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -231,7 +246,27 @@ function App() {
           headers: authHeaders,
         });
         const data = await response.json();
-        setEmployees(Array.isArray(data) ? data : []);
+        let list = [];
+        if (data && Array.isArray(data.employees)) {
+          list = data.employees;
+          if (Array.isArray(data.projects)) {
+            setProjects(data.projects);
+          }
+        } else if (Array.isArray(data)) {
+          list = data;
+        }
+        allEmployeesRef.current = list;
+        setEmployees(list);
+        setHasFetchedEmployees(true);
+        setCounts((prev) => {
+          const updated = {
+            ...prev,
+            totalEmployees: list.length,
+            ...(data && Array.isArray(data.projects) ? { totalProjects: data.projects.length } : {})
+          };
+          try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
+          return updated;
+        });
       } catch (error) {
         console.log("Failed to fetch employees:", error);
       }
@@ -243,24 +278,76 @@ function App() {
           headers: authHeaders,
         });
         const data = await response.json();
+        let projList = [];
         if (data && Array.isArray(data.projects)) {
-          setProjects(data.projects);
+          projList = data.projects;
           if (Array.isArray(data.statuses) && data.statuses.length > 0) {
             setStatuses(data.statuses);
           }
         } else if (Array.isArray(data)) {
-          setProjects(data);
-        } else {
-          setProjects([]);
+          projList = data;
         }
+        setProjects(projList);
+        setHasFetchedProjects(true);
+        setCounts((prev) => {
+          const updated = { ...prev, totalProjects: projList.length };
+          try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
+          return updated;
+        });
       } catch (error) {
         console.log("Failed to fetch projects:", error);
       }
     };
 
-    fetchEmployees();
-    fetchProjects();
-  }, [isLoggedIn, currentUser]);
+    if (activeTab === "employees" && !hasFetchedEmployees) {
+      fetchEmployees();
+    } else if (activeTab === "projects" && !hasFetchedProjects) {
+      fetchProjects();
+    }
+  }, [isLoggedIn, currentUser, activeTab, hasFetchedEmployees, hasFetchedProjects]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !hasFetchedEmployees) return;
+
+    if (!searchQuery.trim()) {
+      if (allEmployeesRef.current.length > 0) {
+        setEmployees(allEmployeesRef.current);
+      }
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const timer = setTimeout(async () => {
+      const token = localStorage.getItem("app_token");
+      const authHeaders = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      try {
+        const url = `${API_BASE_URL}/api/employees?search=${encodeURIComponent(searchQuery.trim())}`;
+
+        const response = await fetch(url, {
+          headers: authHeaders,
+          signal: controller.signal,
+        });
+        const data = await response.json();
+        if (data && Array.isArray(data.employees)) {
+          setEmployees(data.employees);
+        }
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          console.log("Failed to search employees:", error);
+        }
+      }
+    }, 1000);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery, isLoggedIn, hasFetchedEmployees]);
 
   const handleAuthSubmit = async (event) => {
     event.preventDefault();
@@ -288,6 +375,14 @@ function App() {
           email: data.user?.email || email,
         };
         setCurrentUser(userObj);
+        setHasFetchedEmployees(false);
+        setHasFetchedProjects(false);
+        if (data.counts) {
+          setCounts(data.counts);
+          try {
+            localStorage.setItem("app_counts", JSON.stringify(data.counts));
+          } catch (err) {}
+        }
         try {
           if (data.token) {
             localStorage.setItem("app_token", data.token);
@@ -316,9 +411,12 @@ function App() {
   const handleLogout = () => {
     setIsLoggedIn(false);
     setCurrentUser(null);
+    setHasFetchedEmployees(false);
+    setHasFetchedProjects(false);
     try {
       localStorage.removeItem("app_token");
       localStorage.removeItem("app_user");
+      localStorage.removeItem("app_counts");
     } catch (err) {
       console.error("Failed to clear auth storage:", err);
     }
@@ -327,7 +425,7 @@ function App() {
     setLoginError("");
     setEmployees([]);
     setProjects([]);
-    navigate("/")
+    navigate("/");
   };
 
   const handleAvatarFileChange = async (e) => {
@@ -401,6 +499,11 @@ function App() {
       }
 
       setEmployees((previousEmployees) => [...previousEmployees, data]);
+      setCounts((prev) => {
+        const updated = { ...prev, totalEmployees: prev.totalEmployees + 1 };
+        try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
+        return updated;
+      });
       setEmployeeId("");
       setName("");
       setDepartment("");
@@ -448,6 +551,11 @@ function App() {
       setEmployees((previousEmployees) =>
         previousEmployees.filter((employee) => (employee.id || employee._id) !== targetId)
       );
+      setCounts((prev) => {
+        const updated = { ...prev, totalEmployees: Math.max(0, prev.totalEmployees - 1) };
+        try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
+        return updated;
+      });
 
       setDeletingEmployee(null);
     } catch (error) {
@@ -493,11 +601,21 @@ function App() {
         return;
       }
 
-      setEmployees((previousEmployees) =>
-        previousEmployees.map((employee) =>
-          (employee.id || employee._id) === (data.id || data._id) ? data : employee
-        )
-      );
+      const targetId = editingEmployee.id || editingEmployee._id;
+      const updatedFields = {
+        employeeId,
+        name,
+        department,
+        avatar: avatar || "",
+      };
+
+      setEmployees((previousEmployees) => {
+        const updatedList = previousEmployees.map((emp) =>
+          (emp.id || emp._id) === targetId ? { ...emp, ...updatedFields } : emp
+        );
+        allEmployeesRef.current = updatedList;
+        return updatedList;
+      });
 
       setEmployeeId("");
       setName("");
@@ -594,8 +712,26 @@ function App() {
       );
       const data = await response.json();
       if (response.ok) {
+        const targetProjId = project.id || project._id;
         setProjects((prevProjects) =>
-          prevProjects.map((p) => ((p.id || p._id) === (data.id || data._id) ? data : p))
+          prevProjects.map((p) =>
+            (p.id || p._id) === targetProjId ? { ...p, ...payload } : p
+          )
+        );
+        setEmployees((prevEmployees) =>
+          prevEmployees.map((emp) => {
+            if ((emp.id || emp._id) !== (employee.id || employee._id)) return emp;
+            let current = emp.assignedProjects ? [...emp.assignedProjects] : [];
+            const targetProjId = project.id || project._id;
+            if (isCurrentlyAssigned) {
+              current = current.filter((p) => (p.id || p._id) !== targetProjId);
+            } else {
+              if (!current.some((p) => (p.id || p._id) === targetProjId)) {
+                current.push({ id: targetProjId, name: project.name });
+              }
+            }
+            return { ...emp, assignedProjects: current };
+          })
         );
       } else {
         console.error("Failed to update project assignment:", data.message);
@@ -652,7 +788,7 @@ function App() {
                       <Users className="h-4 w-4" />
                       <span className="flex">Employees</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono">
-                        {employees.length}
+                        {employees.length > 0 ? employees.length : (counts.totalEmployees || 0)}
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -665,7 +801,7 @@ function App() {
                       <Briefcase className="h-4 w-4" />
                       <span className="flex">Projects</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono">
-                        {projects.length}
+                        {projects.length > 0 ? projects.length : (counts.totalProjects || 0)}
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -770,7 +906,7 @@ function App() {
                           </div>
                         </CardHeader>
                         <CardContent>
-                          <div className="text-4xl font-extrabold tracking-tight">{employees.length}</div>
+                          <div className="text-4xl font-extrabold tracking-tight">{employees.length > 0 ? employees.length : (counts.totalEmployees || 0)}</div>
                           <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
                             <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
                             Total active workforce members registered
@@ -793,7 +929,7 @@ function App() {
                           </div>
                         </CardHeader>
                         <CardContent>
-                          <div className="text-4xl font-extrabold tracking-tight">{projects.length}</div>
+                          <div className="text-4xl font-extrabold tracking-tight">{projects.length > 0 ? projects.length : (counts.totalProjects || 0)}</div>
                           <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
                             <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
                             Client projects in portfolio database
@@ -828,7 +964,7 @@ function App() {
                           </div>
                           <div className="flex justify-between text-xs pt-0.5">
                             <span className="text-muted-foreground">Total Workforce:</span>
-                            <span className="font-semibold">{employees.length} Active Members</span>
+                            <span className="font-semibold">{employees.length > 0 ? employees.length : (counts.totalEmployees || 0)} Active Members</span>
                           </div>
                         </CardContent>
                       </Card>
@@ -863,7 +999,7 @@ function App() {
                         onClick={() => navigate("/projects")}
                       >
                         <span className="flex items-center gap-2">
-                          <Briefcase className="h-4 w-4" /> View Projects ({projects.length})
+                          <Briefcase className="h-4 w-4" /> View Projects ({projects.length > 0 ? projects.length : (counts.totalProjects || 0)})
                         </span>
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </Button>
@@ -874,7 +1010,7 @@ function App() {
                         onClick={() => navigate("/employees")}
                       >
                         <span className="flex items-center gap-2">
-                          <Users className="h-4 w-4" /> View Employees ({employees.length})
+                          <Users className="h-4 w-4" /> View Employees ({employees.length > 0 ? employees.length : (counts.totalEmployees || 0)})
                         </span>
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </Button>
@@ -986,9 +1122,9 @@ function App() {
                               </TableHeader>
                             <TableBody>
                               {paginatedEmployees.map((employee) => {
-                                const employeeProjects = projects.filter((proj) =>
-                                  isEmployeeAssigned(proj, employee)
-                                );
+                                const employeeProjects = (employee.assignedProjects && employee.assignedProjects.length > 0)
+                                  ? employee.assignedProjects
+                                  : projects.filter((proj) => isEmployeeAssigned(proj, employee));
 
                                 return (
                                   <TableRow key={employee.id || employee._id}>

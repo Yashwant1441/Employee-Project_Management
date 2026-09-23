@@ -114,8 +114,66 @@ app.post("/api/upload/icon", requireAuth, upload.single("icon"), async (req, res
 app.get("/api/employees", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
-        const employees = await Employee.find({ userId });
-        res.json(employees);
+        const search = req.query.search ? String(req.query.search).trim() : "";
+
+        const employees = await Employee.find({ userId }).lean();
+        const projects = await Project.find({ userId }, "name assignedEmployees").lean();
+
+        const isAssigned = (proj, emp) => {
+            if (!Array.isArray(proj.assignedEmployees)) return false;
+            return proj.assignedEmployees.some((item) => {
+                if (!item) return false;
+                const str = String(item).trim().toLowerCase();
+                const empName = emp.name ? String(emp.name).trim().toLowerCase() : "";
+                const empId = emp.employeeId ? String(emp.employeeId).trim().toLowerCase() : "";
+                return str === empName || str === empId;
+            });
+        };
+
+        let employeesWithProjects = employees.map((emp) => {
+            const assigned = projects
+                .filter((proj) => isAssigned(proj, emp))
+                .map((proj) => ({
+                    id: proj._id ? proj._id.toString() : proj.id,
+                    name: proj.name
+                }));
+            const empObj = {
+                ...emp,
+                id: emp._id ? emp._id.toString() : emp.id,
+                assignedProjects: assigned
+            };
+            delete empObj._id;
+            delete empObj.__v;
+            delete empObj.userId;
+            return empObj;
+        });
+
+        if (search) {
+            const searchLower = search.toLowerCase();
+            employeesWithProjects = employeesWithProjects.filter((emp) => {
+                const nameMatch = emp.name && emp.name.toLowerCase().includes(searchLower);
+                const idMatch = emp.employeeId && emp.employeeId.toLowerCase().includes(searchLower);
+                const deptMatch = emp.department && emp.department.toLowerCase().includes(searchLower);
+                const projMatch = emp.assignedProjects && emp.assignedProjects.some((p) => p.name && p.name.toLowerCase().includes(searchLower));
+                return nameMatch || idMatch || deptMatch || projMatch;
+            });
+        }
+
+        const formattedProjects = projects.map((proj) => {
+            const pObj = {
+                ...proj,
+                id: proj._id ? proj._id.toString() : proj.id
+            };
+            delete pObj._id;
+            delete pObj.__v;
+            delete pObj.userId;
+            return pObj;
+        });
+
+        res.json({
+            employees: employeesWithProjects,
+            projects: formattedProjects
+        });
     } catch (error) {
         res.status(500).json({
             message: "Failed to get employees",
@@ -169,7 +227,10 @@ app.post("/api/employees", requireAuth, async (req, res) => {
             avatar: avatar || "",
             userId
         });
-        res.status(201).json(employee);
+        res.status(201).json({
+            message: "Employee created successfully",
+            id: employee._id.toString()
+        });
     } catch (error) {
         res.status(500).json({
             message: "Failed To Create Employee",
@@ -191,7 +252,8 @@ app.delete("/api/employees/:id", requireAuth, async (req, res) => {
         }
         res.json({
             message: "Employee deleted successfully",
-            employee: employee
+            id: req.params.id
+            // employee: employee
         });
     } catch (error) {
         res.status(500).json({
@@ -229,7 +291,10 @@ app.put("/api/employees/:id", requireAuth, async (req, res) => {
                 message: "Employee not found or unauthorized"
             });
         }
-        res.json(employee);
+        res.json({
+            message: "Employee updated successfully",
+            id: req.params.id
+        });
     } catch (error) {
         if (error.code === 11000) {
             return res.status(400).json({
@@ -324,9 +389,23 @@ app.all("/api/projects/query", requireAuth, async (req, res, next) => {
 app.get("/api/projects", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
-        const projects = await Project.find({ userId })
-            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation version documents activities")
-            .sort({ endDate: 1 });
+        const search = req.query.search ? String(req.query.search).trim() : "";
+
+        let projectFilter = { userId };
+        if (search) {
+            const searchRegex = new RegExp(search, "i");
+            projectFilter.$or = [
+                { name: searchRegex },
+                { clientName: searchRegex },
+                { language: searchRegex },
+                { database: searchRegex },
+                { deploymentLocation: searchRegex }
+            ];
+        }
+
+        const projects = await Project.find(projectFilter)
+            .select("name clientName status icon version language database deploymentLocation assignedEmployees employeeCount")
+            .sort({ createdAt: -1 });
 
         const user = await User.findById(userId);
         const defaultStatuses = ["Pending", "In Progress", "Delayed", "Completed"];
@@ -396,7 +475,7 @@ app.post("/api/projects", requireAuth, async (req, res) => {
         try {
             const u = await User.findById(userId);
             if (u && u.email) uEmail = u.email;
-        } catch (e) {}
+        } catch (e) { }
 
         const project = await Project.create({
             name,
@@ -425,7 +504,10 @@ app.post("/api/projects", requireAuth, async (req, res) => {
             userId
         });
 
-        res.status(201).json(project);
+        res.status(201).json({
+            message: "Project created successfully",
+            id: project._id.toString()
+        });
     } catch (error) {
         res.status(500).json({
             message: "Failed to create project",
@@ -510,7 +592,10 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
             }
         }
 
-        res.json(project);
+        res.json({
+            message: "Project updated successfully",
+            id: req.params.id
+        });
     } catch (error) {
         res.status(500).json({
             message: "Failed to update project",
@@ -690,7 +775,7 @@ app.delete("/api/projects/:id", requireAuth, async (req, res) => {
         if (!project) {
             return res.status(404).json({ message: "Project not found or unauthorized" });
         }
-        res.json({ message: "Project deleted successfully", project });
+        res.json({ message: "Project deleted successfully" });
     } catch (error) {
         res.status(500).json({
             message: "Failed to delete project",
@@ -821,12 +906,19 @@ app.post("/api/login", async (req, res) => {
             { expiresIn: "7d" }
         );
 
+        const totalEmployees = await Employee.countDocuments({ userId: user._id });
+        const totalProjects = await Project.countDocuments({ userId: user._id });
+
         res.json({
             message: "Login Successfully",
             token,
             user: {
                 id: user._id.toString(),
                 email: user.email
+            },
+            counts: {
+                totalEmployees,
+                totalProjects
             }
         });
 
@@ -875,6 +967,10 @@ app.post("/api/register", async (req, res) => {
             user: {
                 id: user._id.toString(),
                 email: user.email
+            },
+            counts: {
+                totalEmployees: 0,
+                totalProjects: 0
             }
         });
     } catch (error) {

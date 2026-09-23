@@ -444,6 +444,55 @@ export function ProjectsView({
     }
   }, [selectedProject]);
 
+  const allProjectsRef = useRef([]);
+
+  useEffect(() => {
+    if (projects.length > 0 && !searchQuery.trim()) {
+      allProjectsRef.current = projects;
+    }
+  }, [projects, searchQuery]);
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      if (allProjectsRef.current.length > 0) {
+        setProjects(allProjectsRef.current);
+      }
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const timer = setTimeout(async () => {
+      const token = localStorage.getItem("app_token");
+      const authHeaders = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      try {
+        const url = `${API_BASE_URL}/api/projects?search=${encodeURIComponent(searchQuery.trim())}`;
+
+        const res = await fetch(url, {
+          headers: authHeaders,
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        if (data && Array.isArray(data.projects)) {
+          setProjects(data.projects);
+        }
+      } catch (err) {
+        if (err.name !== "AbortError") {
+          console.error("Failed to search projects:", err);
+        }
+      }
+    }, 1000);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery, setProjects]);
+
   const formatFileSize = (bytes) => {
     if (!bytes || isNaN(bytes) || bytes <= 0) return "0 KB";
     const k = 1024;
@@ -976,6 +1025,11 @@ export function ProjectsView({
       return;
     }
     setSelectedProject(project);
+
+    if (project.documents !== undefined && project.activities !== undefined) {
+      return;
+    }
+
     const projId = project.id || project._id;
     const token = localStorage.getItem("app_token");
     try {
@@ -988,6 +1042,9 @@ export function ProjectsView({
       if (res.ok) {
         const fullProj = await res.json();
         setSelectedProject(fullProj);
+        setProjects((prev) =>
+          prev.map((p) => ((p.id || p._id) === (fullProj.id || fullProj._id) ? fullProj : p))
+        );
       }
     } catch (err) {
       console.log("Failed to fetch project details:", err);
@@ -998,21 +1055,28 @@ export function ProjectsView({
     setEditingProject(project);
     let fullProject = project;
 
-    const projId = project.id || project._id;
-    const token = localStorage.getItem("app_token");
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/projects/${projId}`, {
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (res.ok) {
-        fullProject = await res.json();
-        setEditingProject(fullProject);
+    if (project.documents !== undefined && project.activities !== undefined) {
+      fullProject = project;
+    } else {
+      const projId = project.id || project._id;
+      const token = localStorage.getItem("app_token");
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/projects/${projId}`, {
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (res.ok) {
+          fullProject = await res.json();
+          setEditingProject(fullProject);
+          setProjects((prev) =>
+            prev.map((p) => ((p.id || p._id) === (fullProject.id || fullProject._id) ? fullProject : p))
+          );
+        }
+      } catch (err) {
+        console.log("Failed to fetch project details for edit:", err);
       }
-    } catch (err) {
-      console.log("Failed to fetch project details for edit:", err);
     }
 
     const startStr = formatDateForInput(fullProject.startDate);
@@ -1162,19 +1226,38 @@ export function ProjectsView({
           setIsSubmitting(false);
           return;
         }
+        const targetId = editingProject.id || editingProject._id;
+        let updatedActivities = editingProject.activities || [];
+        if (editingProject.status && payload.status && editingProject.status !== payload.status) {
+          const newActivity = {
+            fromStatus: editingProject.status,
+            toStatus: payload.status,
+            userEmail: currentUser?.email || "System User",
+            createdAt: new Date().toISOString(),
+          };
+          updatedActivities = [...updatedActivities, newActivity];
+        }
+
+        const updatedProject = {
+          ...editingProject,
+          ...payload,
+          activities: updatedActivities,
+        };
+
         setProjects((prev) =>
-          prev.map((p) => ((p.id || p._id) === (data.id || data._id) ? data : p))
+          prev.map((p) => ((p.id || p._id) === targetId ? updatedProject : p))
         );
-        if (selectedProject && (selectedProject.id || selectedProject._id) === (data.id || data._id)) {
-          setSelectedProject(data);
+        if (selectedProject && (selectedProject.id || selectedProject._id) === targetId) {
+          setSelectedProject((prev) => (prev ? { ...prev, ...updatedProject } : updatedProject));
+          setActivities(updatedActivities);
         }
         setNotificationModal({
           isOpen: true,
           title: "Project Updated Successfully",
           entityType: "Project",
           actionType: "updated",
-          id: data.id || data._id || editingProject.id || editingProject._id,
-          name: data.name || payload.name,
+          id: targetId,
+          name: payload.name || editingProject.name,
         });
       } else {
         const res = await fetch(`${API_BASE_URL}/api/projects`, {
@@ -1188,14 +1271,26 @@ export function ProjectsView({
           setIsSubmitting(false);
           return;
         }
-        setProjects((prev) => [data, ...prev]);
+        const newProjectObj = {
+          id: data.id || data._id,
+          ...payload,
+          activities: [
+            {
+              fromStatus: "Created",
+              toStatus: payload.status || "Pending",
+              userEmail: currentUser?.email || "System User",
+              createdAt: new Date().toISOString(),
+            }
+          ]
+        };
+        setProjects((prev) => [newProjectObj, ...prev]);
         setNotificationModal({
           isOpen: true,
           title: "Project Created Successfully",
           entityType: "Project",
           actionType: "created",
           id: data.id || data._id,
-          name: data.name || payload.name,
+          name: payload.name,
         });
       }
 
@@ -1374,7 +1469,7 @@ export function ProjectsView({
           onAddStatus={handleAddStatus}
           onDeleteStatus={handleDeleteStatus}
           projects={filteredProjects}
-          onSelectProject={setSelectedProject}
+          onSelectProject={handleSelectProject}
           onUpdateStatus={handleUpdateProjectStatus}
           renderProjectIcon={renderProjectIcon}
           getStatusBadge={getStatusBadge}
@@ -1404,7 +1499,7 @@ export function ProjectsView({
             {paginatedProjects.map((project) => (
               <Card
                 key={project.id || project._id}
-                onClick={() => setSelectedProject(project)}
+                onClick={() => handleSelectProject(project)}
                 className="group relative cursor-pointer overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:border-primary/50 border border-border bg-card flex flex-col justify-between"
               >
                 <CardHeader className="p-6">

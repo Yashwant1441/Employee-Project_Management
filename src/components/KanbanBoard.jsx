@@ -168,10 +168,10 @@ export function KanbanBoard({
             return (
               <div
                 key={column.id}
-                className={`w-80 2xl:w-88 3xl:w-96 shrink-0 flex flex-col rounded-xl border border-border bg-card/60 backdrop-blur-sm shadow-sm`}
+                className={`w-80 2xl:w-88 3xl:w-96 shrink-0 flex flex-col rounded-xl border border-border bg-card/60 backdrop-blur-sm shadow-sm max-h-[calc(100vh-220px)] min-h-[480px]`}
               >
                 {/* Column Header */}
-                <div className="p-3.5 border-b border-border/70 flex items-center justify-between bg-muted/40 rounded-t-xl">
+                <div className="p-3.5 border-b border-border/70 flex items-center justify-between bg-muted/40 rounded-t-xl shrink-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <ColumnIcon className={`h-4 w-4 shrink-0 ${column.accentColor}`} />
                     <h3 className="font-bold text-sm tracking-tight text-foreground truncate">
@@ -223,10 +223,11 @@ export function KanbanBoard({
                     <div
                       ref={provided.innerRef}
                       {...provided.droppableProps}
-                      className={`p-3 min-h-[460px] 2xl:min-h-[560px] flex flex-col gap-3 transition-colors duration-200 ${snapshot.isDraggingOver
+                      className={`p-3 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 transition-colors duration-200 ${snapshot.isDraggingOver
                         ? "bg-primary/5 ring-2 ring-primary/20 ring-inset rounded-b-xl"
                         : ""
                         }`}
+                      style={{ maxHeight: "calc(100vh - 280px)", minHeight: "420px" }}
                     >
                       {columnProjects.length === 0 ? (
                         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center border border-dashed border-border/60 rounded-lg my-auto text-muted-foreground">
