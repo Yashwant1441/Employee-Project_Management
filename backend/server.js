@@ -159,6 +159,10 @@ app.get("/api/employees", requireAuth, async (req, res) => {
             });
         }
 
+        if (search) {
+            return res.json({ employees: employeesWithProjects });
+        }
+
         const formattedProjects = projects.map((proj) => {
             const pObj = {
                 ...proj,
