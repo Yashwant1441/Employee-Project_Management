@@ -115,6 +115,7 @@ app.get("/api/employees", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
         const search = req.query.search ? String(req.query.search).trim() : "";
+        const isPaginated = req.query.page !== undefined || req.query.limit !== undefined;
 
         const employees = await Employee.find({ userId }).lean();
         const projects = await Project.find({ userId }, "name assignedEmployees").lean();
@@ -159,10 +160,6 @@ app.get("/api/employees", requireAuth, async (req, res) => {
             });
         }
 
-        if (search) {
-            return res.json({ employees: employeesWithProjects });
-        }
-
         const formattedProjects = projects.map((proj) => {
             const pObj = {
                 ...proj,
@@ -174,9 +171,29 @@ app.get("/api/employees", requireAuth, async (req, res) => {
             return pObj;
         });
 
+        const totalEmployees = employeesWithProjects.length;
+
+        let resultEmployees = employeesWithProjects;
+        let page = 1;
+        let limit = totalEmployees || 5;
+        let totalPages = 1;
+
+        if (isPaginated) {
+            page = Math.max(1, parseInt(req.query.page, 10) || 1);
+            limit = Math.max(1, parseInt(req.query.limit, 10) || 5);
+            const startIndex = (page - 1) * limit;
+            totalPages = Math.ceil(totalEmployees / limit) || 1;
+            resultEmployees = employeesWithProjects.slice(startIndex, startIndex + limit);
+        }
+
         res.json({
-            employees: employeesWithProjects,
-            projects: formattedProjects
+            employees: resultEmployees,
+            pagination: {
+                totalEmployees,
+                totalPages: isPaginated ? totalPages : (Math.ceil(totalEmployees / 5) || 1),
+                currentPage: page,
+                limit
+            }
         });
     } catch (error) {
         res.status(500).json({
@@ -394,6 +411,7 @@ app.get("/api/projects", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
         const search = req.query.search ? String(req.query.search).trim() : "";
+        const isPaginated = req.query.page !== undefined || req.query.limit !== undefined;
 
         let projectFilter = { userId };
         if (search) {
@@ -407,9 +425,25 @@ app.get("/api/projects", requireAuth, async (req, res) => {
             ];
         }
 
-        const projects = await Project.find(projectFilter)
-            .select("name clientName status icon version language database deploymentLocation assignedEmployees employeeCount")
+        const totalProjects = await Project.countDocuments(projectFilter);
+
+        let query = Project.find(projectFilter)
+            .select("name clientName status icon version")
             .sort({ createdAt: -1 });
+
+        let page = 1;
+        let limit = totalProjects || 6;
+        let totalPages = 1;
+
+        if (isPaginated) {
+            page = Math.max(1, parseInt(req.query.page, 10) || 1);
+            limit = Math.max(1, parseInt(req.query.limit, 10) || 6);
+            const skip = (page - 1) * limit;
+            totalPages = Math.ceil(totalProjects / limit) || 1;
+            query = query.skip(skip).limit(limit);
+        }
+
+        const projects = await query;
 
         const user = await User.findById(userId);
         const defaultStatuses = ["Pending", "In Progress", "Delayed", "Completed"];
@@ -417,7 +451,13 @@ app.get("/api/projects", requireAuth, async (req, res) => {
             ? user.customStatuses
             : defaultStatuses;
 
-        res.json({ projects, statuses });
+        res.json({
+            projects,
+            pagination: {
+                totalProjects,
+                totalPages: isPaginated ? totalPages : (Math.ceil(totalProjects / 6) || 1)
+            }
+        });
     } catch (error) {
         res.status(500).json({
             message: "Failed to fetch projects",

@@ -177,6 +177,9 @@ function App() {
   };
 
   const [itemsPerPage, setItemsPerPage] = useState(5);
+  const [totalEmployeesCount, setTotalEmployeesCount] = useState(0);
+  const [totalPagesCount, setTotalPagesCount] = useState(1);
+  const [totalProjectsCount, setTotalProjectsCount] = useState(0);
 
   const isEmployeeAssigned = (project, employee) => {
     if (!project || !employee) return false;
@@ -200,39 +203,23 @@ function App() {
     });
   };
 
-  const filteredEmployees = employees.filter((employee) => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return true;
+  const filteredEmployees = employees;
 
-    const nameMatch = employee.name && employee.name.toLowerCase().includes(q);
-    const idMatch = employee.employeeId && employee.employeeId.toLowerCase().includes(q);
-
-    const empProjects = (employee.assignedProjects && employee.assignedProjects.length > 0)
-      ? employee.assignedProjects
-      : projects.filter((proj) => isEmployeeAssigned(proj, employee));
-
-    const projectMatch = empProjects.some((proj) => {
-      const projNameMatch = proj.name && proj.name.toLowerCase().includes(q);
-      const projIdMatch = (proj.projectId || proj.id || proj._id || "").toString().toLowerCase().includes(q);
-      return projNameMatch || projIdMatch;
-    });
-
-    return nameMatch || idMatch || projectMatch;
-  });
-
-  const totalPages = Math.ceil(filteredEmployees.length / itemsPerPage) || 1;
+  const totalPages = totalPagesCount;
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedEmployees = filteredEmployees.slice(
-    startIndex,
-    startIndex + itemsPerPage
-  );
+  const paginatedEmployees = employees;
 
   const allEmployeesRef = useRef([]);
 
-  useEffect(() => {
-    if (!isLoggedIn) {
+  const lastFetchedEmpKeyRef = useRef("");
+
+  const fetchEmployees = async (page = currentPage, limit = itemsPerPage, search = searchQuery, force = false) => {
+    if (!isLoggedIn) return;
+    const key = `${page}-${limit}-${search.trim()}`;
+    if (!force && lastFetchedEmpKeyRef.current === key) {
       return;
     }
+    lastFetchedEmpKeyRef.current = key;
 
     const token = localStorage.getItem("app_token");
     const authHeaders = {
@@ -240,116 +227,105 @@ function App() {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
 
-    const fetchEmployees = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/employees`, {
-          headers: authHeaders,
-        });
-        const data = await response.json();
-        let list = [];
-        if (data && Array.isArray(data.employees)) {
-          list = data.employees;
-          if (Array.isArray(data.projects)) {
-            setProjects(data.projects);
-          }
-        } else if (Array.isArray(data)) {
-          list = data;
+    try {
+      const url = `${API_BASE_URL}/api/employees?page=${page}&limit=${limit}&search=${encodeURIComponent(search.trim())}`;
+      const response = await fetch(url, { headers: authHeaders });
+      const data = await response.json();
+      let list = [];
+      if (data && Array.isArray(data.employees)) {
+        list = data.employees;
+        if (Array.isArray(data.projects)) {
+          setProjects(data.projects);
         }
-        allEmployeesRef.current = list;
-        setEmployees(list);
-        setHasFetchedEmployees(true);
-        setCounts((prev) => {
-          const updated = {
-            ...prev,
-            totalEmployees: list.length,
-            ...(data && Array.isArray(data.projects) ? { totalProjects: data.projects.length } : {})
-          };
-          try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
-          return updated;
-        });
-      } catch (error) {
-        console.log("Failed to fetch employees:", error);
+      } else if (Array.isArray(data)) {
+        list = data;
       }
-    };
-
-    const fetchProjects = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/projects`, {
-          headers: authHeaders,
-        });
-        const data = await response.json();
-        let projList = [];
-        if (data && Array.isArray(data.projects)) {
-          projList = data.projects;
-          if (Array.isArray(data.statuses) && data.statuses.length > 0) {
-            setStatuses(data.statuses);
-          }
-        } else if (Array.isArray(data)) {
-          projList = data;
-        }
-        setProjects(projList);
-        setHasFetchedProjects(true);
-        setCounts((prev) => {
-          const updated = { ...prev, totalProjects: projList.length };
-          try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
-          return updated;
-        });
-      } catch (error) {
-        console.log("Failed to fetch projects:", error);
+      allEmployeesRef.current = list;
+      setEmployees(list);
+      if (data.pagination) {
+        setTotalEmployeesCount(data.pagination.totalEmployees);
+        setTotalPagesCount(data.pagination.totalPages);
+      } else {
+        setTotalEmployeesCount(list.length);
+        setTotalPagesCount(Math.ceil(list.length / limit) || 1);
       }
-    };
-
-    if (activeTab === "employees" && !hasFetchedEmployees) {
-      fetchEmployees();
-    } else if (activeTab === "projects" && !hasFetchedProjects) {
-      fetchProjects();
+      setHasFetchedEmployees(true);
+      setCounts((prev) => {
+        const updated = {
+          ...prev,
+          totalEmployees: data.pagination ? data.pagination.totalEmployees : list.length,
+          ...(data && Array.isArray(data.projects) ? { totalProjects: data.projects.length } : {})
+        };
+        try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) { }
+        return updated;
+      });
+    } catch (error) {
+      console.log("Failed to fetch employees:", error);
+      lastFetchedEmpKeyRef.current = "";
     }
-  }, [isLoggedIn, currentUser, activeTab, hasFetchedEmployees, hasFetchedProjects]);
+  };
 
-  const prevEmpSearchRef = useRef("");
-
-  useEffect(() => {
-    if (!isLoggedIn || !hasFetchedEmployees) return;
-
-    if (!searchQuery.trim() && !prevEmpSearchRef.current) return;
-
-    const isClearing = !searchQuery.trim() && prevEmpSearchRef.current;
-    prevEmpSearchRef.current = searchQuery.trim();
-
-    const controller = new AbortController();
-
-    const timer = setTimeout(async () => {
+  const fetchProjects = async () => {
+    try {
       const token = localStorage.getItem("app_token");
       const authHeaders = {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       };
-
-      try {
-        const url = searchQuery.trim()
-          ? `${API_BASE_URL}/api/employees?search=${encodeURIComponent(searchQuery.trim())}`
-          : `${API_BASE_URL}/api/employees`;
-
-        const response = await fetch(url, {
-          headers: authHeaders,
-          signal: controller.signal,
-        });
-        const data = await response.json();
-        if (data && Array.isArray(data.employees)) {
-          setEmployees(data.employees);
+      const response = await fetch(`${API_BASE_URL}/api/projects`, {
+        headers: authHeaders,
+      });
+      const data = await response.json();
+      let projList = [];
+      if (data && Array.isArray(data.projects)) {
+        projList = data.projects;
+        if (Array.isArray(data.statuses) && data.statuses.length > 0) {
+          setStatuses(data.statuses);
         }
-      } catch (error) {
-        if (error.name !== "AbortError") {
-          console.log("Failed to search employees:", error);
-        }
+      } else if (Array.isArray(data)) {
+        projList = data;
       }
-    }, isClearing ? 0 : 1000);
+      setProjects(projList);
+      if (data.pagination) {
+        setTotalProjectsCount(data.pagination.totalProjects);
+      } else {
+        setTotalProjectsCount(projList.length);
+      }
+      setHasFetchedProjects(true);
+      setCounts((prev) => {
+        const updated = { ...prev, totalProjects: data.pagination ? data.pagination.totalProjects : projList.length };
+        try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) { }
+        return updated;
+      });
+    } catch (error) {
+      console.log("Failed to fetch projects:", error);
+    }
+  };
 
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [searchQuery, isLoggedIn, hasFetchedEmployees]);
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (activeTab === "employees") {
+      fetchEmployees(currentPage, itemsPerPage, searchQuery);
+    }
+  }, [isLoggedIn, activeTab, currentPage, itemsPerPage]);
+
+  const isFirstEmpMountRef = useRef(true);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    if (isFirstEmpMountRef.current) {
+      isFirstEmpMountRef.current = false;
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setCurrentPage(1);
+      fetchEmployees(1, itemsPerPage, searchQuery);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, isLoggedIn]);
 
   const handleAuthSubmit = async (event) => {
     event.preventDefault();
@@ -383,7 +359,7 @@ function App() {
           setCounts(data.counts);
           try {
             localStorage.setItem("app_counts", JSON.stringify(data.counts));
-          } catch (err) {}
+          } catch (err) { }
         }
         try {
           if (data.token) {
@@ -512,9 +488,10 @@ function App() {
       setEmployees((previousEmployees) => [...previousEmployees, newEmployee]);
       setCounts((prev) => {
         const updated = { ...prev, totalEmployees: prev.totalEmployees + 1 };
-        try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
+        try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) { }
         return updated;
       });
+      fetchEmployees(currentPage, itemsPerPage, searchQuery, true);
       setEmployeeId("");
       setName("");
       setDepartment("");
@@ -559,15 +536,7 @@ function App() {
         return;
       }
 
-      setEmployees((previousEmployees) =>
-        previousEmployees.filter((employee) => (employee.id || employee._id) !== targetId)
-      );
-      setCounts((prev) => {
-        const updated = { ...prev, totalEmployees: Math.max(0, prev.totalEmployees - 1) };
-        try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) {}
-        return updated;
-      });
-
+      fetchEmployees(currentPage, itemsPerPage, searchQuery, true);
       setDeletingEmployee(null);
     } catch (error) {
       console.log("Failed to delete employee:", error);
@@ -799,7 +768,7 @@ function App() {
                       <Users className="h-4 w-4" />
                       <span className="flex">Employees</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono">
-                        {employees.length > 0 ? employees.length : (counts.totalEmployees || 0)}
+                        {totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0)}
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -812,7 +781,7 @@ function App() {
                       <Briefcase className="h-4 w-4" />
                       <span className="flex">Projects</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono">
-                        {projects.length > 0 ? projects.length : (counts.totalProjects || 0)}
+                        {totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0)}
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -872,412 +841,412 @@ function App() {
                 <Route
                   path="/"
                   element={
-                <div className="space-y-8 2xl:space-y-10 w-full max-w-[1920px] 2xl:max-w-none mx-auto">
-                  {/* Hero Header */}
-                  <div className="rounded-2xl border border-border bg-card p-6 md:p-8 shadow-xs relative overflow-hidden">
-                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
-                      <div className="flex items-center gap-4">
-                        <div className="h-16 w-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-inner">
-                          <Building2 className="h-8 w-8" />
+                    <div className="space-y-8 2xl:space-y-10 w-full max-w-[1920px] 2xl:max-w-none mx-auto">
+                      {/* Hero Header */}
+                      <div className="rounded-2xl border border-border bg-card p-6 md:p-8 shadow-xs relative overflow-hidden">
+                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
+                          <div className="flex items-center gap-4">
+                            <div className="h-16 w-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-inner">
+                              <Building2 className="h-8 w-8" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+                                  {companyInfo.name}
+                                </h1>
+                                <Badge variant="outline" className="font-mono text-xs">
+                                  {companyInfo.code}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                Welcome to your centralized organization dashboard.
+                              </p>
+                            </div>
+                          </div>
+
+                          <Button onClick={() => navigate("/employees")} size="sm">
+                            <Users className="mr-2 h-4 w-4" /> Manage Employees
+                          </Button>
                         </div>
+                      </div>
+
+                      {/* Main Metric Cards: Total Employees & Projects */}
+                      <div>
+                        <h2 className="text-lg font-bold mb-4 tracking-tight">Organization Metrics</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-3 2xl:grid-cols-3 gap-6 2xl:gap-8">
+
+                          {/* Stat Card: Employees */}
+                          <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => navigate("/employees")}>
+                            <CardHeader className="flex flex-row items-center justify-between pb-2">
+                              <CardTitle className="text-sm font-semibold text-muted-foreground">
+                                Number of Employees
+                              </CardTitle>
+                              <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                                <Users className="h-5 w-5" />
+                              </div>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="text-4xl font-extrabold tracking-tight">{totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0)}</div>
+                              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                                <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
+                                Total active workforce members registered
+                              </p>
+                            </CardContent>
+                            <CardFooter className="pt-2 text-xs text-primary font-medium flex items-center justify-between border-t border-border/50">
+                              <span>Open Employee Directory</span>
+                              <ChevronRight className="h-4 w-4" />
+                            </CardFooter>
+                          </Card>
+
+                          {/* Stat Card: Projects */}
+                          <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => navigate("/projects")}>
+                            <CardHeader className="flex flex-row items-center justify-between pb-2">
+                              <CardTitle className="text-sm font-semibold text-muted-foreground">
+                                Active Projects
+                              </CardTitle>
+                              <div className="h-9 w-9 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                                <Briefcase className="h-5 w-5" />
+                              </div>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="text-4xl font-extrabold tracking-tight">{totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0)}</div>
+                              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                                <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
+                                Client projects in portfolio database
+                              </p>
+                            </CardContent>
+                            <CardFooter className="pt-2 text-xs text-primary font-medium flex items-center justify-between border-t border-border/50">
+                              <span>Explore Project Portfolio</span>
+                              <ChevronRight className="h-4 w-4" />
+                            </CardFooter>
+                          </Card>
+
+                          {/* Info Card: Company Overview */}
+                          <Card>
+                            <CardHeader className="flex flex-row items-center justify-between pb-2">
+                              <CardTitle className="text-sm font-semibold text-muted-foreground">
+                                Company Status
+                              </CardTitle>
+                              <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                                <ShieldCheck className="h-5 w-5" />
+                              </div>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                              <div className="flex justify-between text-xs border-b border-border/60 pb-1.5">
+                                <span className="text-muted-foreground">Company Name:</span>
+                                <span className="font-semibold">{companyInfo.name}</span>
+                              </div>
+                              <div className="flex justify-between text-xs border-b border-border/60 pb-1.5">
+                                <span className="text-muted-foreground">System Status:</span>
+                                <span className="font-semibold text-emerald-600 flex items-center gap-1">
+                                  <UserCheck className="h-3 w-3" /> Active & Operational
+                                </span>
+                              </div>
+                              <div className="flex justify-between text-xs pt-0.5">
+                                <span className="text-muted-foreground">Total Workforce:</span>
+                                <span className="font-semibold">{totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0)} Active Members</span>
+                              </div>
+                            </CardContent>
+                          </Card>
+
+                        </div>
+                      </div>
+
+                      {/* Quick Shortcuts */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-base">Quick Actions</CardTitle>
+                          <CardDescription>Shortcut to employee and project tools</CardDescription>
+                        </CardHeader>
+                        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <Button
+                            variant="outline"
+                            className="justify-between"
+                            onClick={() => {
+                              navigate("/employees");
+                              handleOpenAddModal();
+                            }}
+                          >
+                            <span className="flex items-center gap-2">
+                              <Plus className="h-4 w-4" /> Add New Employee
+                            </span>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+
+                          <Button
+                            variant="outline"
+                            className="justify-between"
+                            onClick={() => navigate("/projects")}
+                          >
+                            <span className="flex items-center gap-2">
+                              <Briefcase className="h-4 w-4" /> View Projects ({totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0)})
+                            </span>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+
+                          <Button
+                            variant="outline"
+                            className="justify-between"
+                            onClick={() => navigate("/employees")}
+                          >
+                            <span className="flex items-center gap-2">
+                              <Users className="h-4 w-4" /> View Employees ({totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0)})
+                            </span>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  }
+                />
+
+                {/* PROJECTS PAGE VIEW */}
+                <Route
+                  path="/projects"
+                  element={
+                    <ProjectsView
+                      projects={projects}
+                      setProjects={setProjects}
+                      statuses={statuses}
+                      setStatuses={setStatuses}
+                      employees={employees}
+                      currentUser={currentUser}
+                    />
+                  }
+                />
+
+                {/* EMPLOYEES PAGE VIEW */}
+                <Route
+                  path="/employees"
+                  element={
+                    <div className="space-y-6 2xl:space-y-8 w-full max-w-[1920px] 2xl:max-w-none mx-auto">
+                      {/* Header Bar */}
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-6">
                         <div>
-                          <div className="flex items-center gap-2">
-                            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-                              {companyInfo.name}
-                            </h1>
-                            <Badge variant="outline" className="font-mono text-xs">
-                              {companyInfo.code}
+                          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                            Employee Management
+                          </h1>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Manage your team members, track departments, and update records.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Button onClick={handleOpenAddModal}>
+                            <Plus className="mr-2 h-4 w-4" /> Add Employee
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Employee Directory Table Card */}
+                      <Card>
+                        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between space-y-0 pb-4">
+                          <div>
+                            <CardTitle className="text-xl">Employees</CardTitle>
+                            <CardDescription className="mt-1">
+                              A list of all active employees in your workspace.
+                            </CardDescription>
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <div className="relative w-full sm:w-64">
+                              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                              <Input
+                                type="text"
+                                placeholder="Search by name, ID, or project..."
+                                value={searchQuery}
+                                onChange={(e) => {
+                                  setSearchQuery(e.target.value);
+                                  setCurrentPage(1);
+                                }}
+                                className="pl-9 text-sm"
+                              />
+                            </div>
+                            <Badge variant="secondary" className="font-mono self-start sm:self-auto">
+                              Total: {totalEmployeesCount}
                             </Badge>
                           </div>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Welcome to your centralized organization dashboard.
-                          </p>
-                        </div>
-                      </div>
-
-                      <Button onClick={() => navigate("/employees")} size="sm">
-                        <Users className="mr-2 h-4 w-4" /> Manage Employees
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Main Metric Cards: Total Employees & Projects */}
-                  <div>
-                    <h2 className="text-lg font-bold mb-4 tracking-tight">Organization Metrics</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 2xl:grid-cols-3 gap-6 2xl:gap-8">
-
-                      {/* Stat Card: Employees */}
-                      <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => navigate("/employees")}>
-                        <CardHeader className="flex flex-row items-center justify-between pb-2">
-                          <CardTitle className="text-sm font-semibold text-muted-foreground">
-                            Number of Employees
-                          </CardTitle>
-                          <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                            <Users className="h-5 w-5" />
-                          </div>
                         </CardHeader>
                         <CardContent>
-                          <div className="text-4xl font-extrabold tracking-tight">{employees.length > 0 ? employees.length : (counts.totalEmployees || 0)}</div>
-                          <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-                            <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
-                            Total active workforce members registered
-                          </p>
-                        </CardContent>
-                        <CardFooter className="pt-2 text-xs text-primary font-medium flex items-center justify-between border-t border-border/50">
-                          <span>Open Employee Directory</span>
-                          <ChevronRight className="h-4 w-4" />
-                        </CardFooter>
-                      </Card>
-
-                      {/* Stat Card: Projects */}
-                      <Card className="hover:border-primary/50 transition-all cursor-pointer" onClick={() => navigate("/projects")}>
-                        <CardHeader className="flex flex-row items-center justify-between pb-2">
-                          <CardTitle className="text-sm font-semibold text-muted-foreground">
-                            Active Projects
-                          </CardTitle>
-                          <div className="h-9 w-9 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-                            <Briefcase className="h-5 w-5" />
-                          </div>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="text-4xl font-extrabold tracking-tight">{projects.length > 0 ? projects.length : (counts.totalProjects || 0)}</div>
-                          <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-                            <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
-                            Client projects in portfolio database
-                          </p>
-                        </CardContent>
-                        <CardFooter className="pt-2 text-xs text-primary font-medium flex items-center justify-between border-t border-border/50">
-                          <span>Explore Project Portfolio</span>
-                          <ChevronRight className="h-4 w-4" />
-                        </CardFooter>
-                      </Card>
-
-                      {/* Info Card: Company Overview */}
-                      <Card>
-                        <CardHeader className="flex flex-row items-center justify-between pb-2">
-                          <CardTitle className="text-sm font-semibold text-muted-foreground">
-                            Company Status
-                          </CardTitle>
-                          <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                            <ShieldCheck className="h-5 w-5" />
-                          </div>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          <div className="flex justify-between text-xs border-b border-border/60 pb-1.5">
-                            <span className="text-muted-foreground">Company Name:</span>
-                            <span className="font-semibold">{companyInfo.name}</span>
-                          </div>
-                          <div className="flex justify-between text-xs border-b border-border/60 pb-1.5">
-                            <span className="text-muted-foreground">System Status:</span>
-                            <span className="font-semibold text-emerald-600 flex items-center gap-1">
-                              <UserCheck className="h-3 w-3" /> Active & Operational
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-xs pt-0.5">
-                            <span className="text-muted-foreground">Total Workforce:</span>
-                            <span className="font-semibold">{employees.length > 0 ? employees.length : (counts.totalEmployees || 0)} Active Members</span>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                    </div>
-                  </div>
-
-                  {/* Quick Shortcuts */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">Quick Actions</CardTitle>
-                      <CardDescription>Shortcut to employee and project tools</CardDescription>
-                    </CardHeader>
-                    <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <Button
-                        variant="outline"
-                        className="justify-between"
-                        onClick={() => {
-                          navigate("/employees");
-                          handleOpenAddModal();
-                        }}
-                      >
-                        <span className="flex items-center gap-2">
-                          <Plus className="h-4 w-4" /> Add New Employee
-                        </span>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        className="justify-between"
-                        onClick={() => navigate("/projects")}
-                      >
-                        <span className="flex items-center gap-2">
-                          <Briefcase className="h-4 w-4" /> View Projects ({projects.length > 0 ? projects.length : (counts.totalProjects || 0)})
-                        </span>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        className="justify-between"
-                        onClick={() => navigate("/employees")}
-                      >
-                        <span className="flex items-center gap-2">
-                          <Users className="h-4 w-4" /> View Employees ({employees.length > 0 ? employees.length : (counts.totalEmployees || 0)})
-                        </span>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </div>
-              }
-            />
-
-            {/* PROJECTS PAGE VIEW */}
-            <Route
-              path="/projects"
-              element={
-                <ProjectsView
-                  projects={projects}
-                  setProjects={setProjects}
-                  statuses={statuses}
-                  setStatuses={setStatuses}
-                  employees={employees}
-                  currentUser={currentUser}
-                />
-              }
-            />
-
-            {/* EMPLOYEES PAGE VIEW */}
-            <Route
-              path="/employees"
-              element={
-                <div className="space-y-6 2xl:space-y-8 w-full max-w-[1920px] 2xl:max-w-none mx-auto">
-                  {/* Header Bar */}
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-6">
-                    <div>
-                      <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                        Employee Management
-                      </h1>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Manage your team members, track departments, and update records.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Button onClick={handleOpenAddModal}>
-                        <Plus className="mr-2 h-4 w-4" /> Add Employee
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Employee Directory Table Card */}
-                  <Card>
-                    <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between space-y-0 pb-4">
-                      <div>
-                        <CardTitle className="text-xl">Employees</CardTitle>
-                        <CardDescription className="mt-1">
-                          A list of all active employees in your workspace.
-                        </CardDescription>
-                      </div>
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <div className="relative w-full sm:w-64">
-                          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            type="text"
-                            placeholder="Search by name, ID, or project..."
-                            value={searchQuery}
-                            onChange={(e) => {
-                              setSearchQuery(e.target.value);
-                              setCurrentPage(1);
-                            }}
-                            className="pl-9 text-sm"
-                          />
-                        </div>
-                        <Badge variant="secondary" className="font-mono self-start sm:self-auto">
-                          Total: {filteredEmployees.length}
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      {filteredEmployees.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center p-8 text-center border border-dashed border-border rounded-lg my-4">
-                          <Users className="h-10 w-10 text-muted-foreground mb-3" />
-                          <h3 className="font-semibold text-lg text-foreground">
-                            {searchQuery ? "No matching employees found" : "No employees found"}
-                          </h3>
-                          <p className="text-sm text-muted-foreground max-w-sm mt-1 mb-4">
-                            {searchQuery
-                              ? `No employee names, IDs, or assigned projects match "${searchQuery}".`
-                              : "Get started by adding a new employee to your organization directory."}
-                          </p>
-                          {searchQuery ? (
-                            <Button variant="outline" onClick={() => setSearchQuery("")} size="sm">
-                              Clear Search
-                            </Button>
-                          ) : (
-                            <Button onClick={handleOpenAddModal} size="sm">
-                              <Plus className="mr-2 h-4 w-4" /> Add Employee
-                            </Button>
-                          )}
-                        </div>
-                      ) : (
-                        <>
-                          <div className="overflow-x-auto w-full border border-border/60 rounded-lg">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="w-[120px] sm:w-[140px]">Employee ID</TableHead>
-                                  <TableHead className="min-w-[140px]">Name</TableHead>
-                                  <TableHead className="min-w-[110px]">Department</TableHead>
-                                  <TableHead className="min-w-[200px]">Assign Projects</TableHead>
-                                  <TableHead className="text-right min-w-[140px]">Actions</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                            <TableBody>
-                              {paginatedEmployees.map((employee) => {
-                                const employeeProjects = (employee.assignedProjects && employee.assignedProjects.length > 0)
-                                  ? employee.assignedProjects
-                                  : projects.filter((proj) => isEmployeeAssigned(proj, employee));
-
-                                return (
-                                  <TableRow key={employee.id || employee._id}>
-                                    <TableCell className="font-mono">
-                                      <Badge variant="outline">{employee.employeeId}</Badge>
-                                    </TableCell>
-                                    <TableCell className="font-medium text-foreground">
-                                      <div className="flex items-center gap-3">
-                                        <div className="h-8 w-8 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden shadow-xs">
-                                          {employee.avatar ? (
-                                            <img src={employee.avatar} alt={employee.name} className="h-full w-full object-cover" />
-                                          ) : (
-                                            employee.name ? employee.name.charAt(0).toUpperCase() : "E"
-                                          )}
-                                        </div>
-                                        <span>{employee.name}</span>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell>
-                                      <Badge variant="secondary">{employee.department}</Badge>
-                                    </TableCell>
-                                    <TableCell>
-                                      <div className="flex flex-wrap items-center gap-1.5">
-                                        {employeeProjects.slice(0, 2).map((proj) => (
-                                          <Badge
-                                            key={proj.id || proj._id}
-                                            variant="outline"
-                                            className="text-[11px] bg-primary/5 text-primary border-primary/20 font-normal"
-                                          >
-                                            {proj.name}
-                                          </Badge>
-                                        ))}
-                                        {employeeProjects.length > 2 && (
-                                          <Badge variant="secondary" className="text-[10px]">
-                                            +{employeeProjects.length - 2} more
-                                          </Badge>
-                                        )}
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-7 text-xs px-2.5 gap-1.5 hover:bg-primary hover:text-primary-foreground transition-colors"
-                                          onClick={() => {
-                                            setAssigningEmployeeProjects(employee);
-                                            setProjectSearchQuery("");
-                                          }}
-                                        >
-                                          <Briefcase className="h-3 w-3" />
-                                          {employeeProjects.length === 0 ? "Assign Projects" : "Manage Projects"}
-                                        </Button>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                      <div className="flex items-center justify-end gap-2">
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => handleEditEmployee(employee)}
-                                        >
-                                          <Edit3 className="mr-1.5 h-3.5 w-3.5" /> Edit
-                                        </Button>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                          onClick={() => setDeletingEmployee(employee)}
-                                        >
-                                          <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
-                                        </Button>
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
-                        </div>
-
-                          {/* Pagination Controls */}
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-4 mt-4">
-                            <div className="flex flex-wrap items-center gap-4">
-                              <div className="text-xs text-muted-foreground">
-                                Showing {filteredEmployees.length === 0 ? 0 : startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredEmployees.length)} of {filteredEmployees.length} employees
-                              </div>
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground border-l border-border pl-4">
-                                <span>Rows per page:</span>
-                                <select
-                                  value={itemsPerPage}
-                                  onChange={(e) => {
-                                    setItemsPerPage(Number(e.target.value));
-                                    setCurrentPage(1);
-                                  }}
-                                  className="bg-background border border-input rounded-md px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer shadow-xs"
-                                >
-                                  {[5, 6, 7, 8, 9, 10].map((num) => (
-                                    <option key={num} value={num}>
-                                      {num}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
+                          {employees.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center p-8 text-center border border-dashed border-border rounded-lg my-4">
+                              <Users className="h-10 w-10 text-muted-foreground mb-3" />
+                              <h3 className="font-semibold text-lg text-foreground">
+                                {searchQuery ? "No matching employees found" : "No employees found"}
+                              </h3>
+                              <p className="text-sm text-muted-foreground max-w-sm mt-1 mb-4">
+                                {searchQuery
+                                  ? `No employee names, IDs, or assigned projects match "${searchQuery}".`
+                                  : "Get started by adding a new employee to your organization directory."}
+                              </p>
+                              {searchQuery ? (
+                                <Button variant="outline" onClick={() => setSearchQuery("")} size="sm">
+                                  Clear Search
+                                </Button>
+                              ) : (
+                                <Button onClick={handleOpenAddModal} size="sm">
+                                  <Plus className="mr-2 h-4 w-4" /> Add Employee
+                                </Button>
+                              )}
                             </div>
-                            {totalPages > 1 && (
-                              <Pagination className="w-auto mx-0">
-                                <PaginationContent>
-                                  <PaginationItem>
-                                    <PaginationPrevious
-                                      onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                                      disabled={currentPage === 1}
-                                      className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                                    />
-                                  </PaginationItem>
-                                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                                    <PaginationItem key={page}>
-                                      <PaginationLink
-                                        isActive={page === currentPage}
-                                        onClick={() => setCurrentPage(page)}
-                                        className="cursor-pointer"
-                                      >
-                                        {page}
-                                      </PaginationLink>
-                                    </PaginationItem>
-                                  ))}
-                                  <PaginationItem>
-                                    <PaginationNext
-                                      onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                                      disabled={currentPage === totalPages}
-                                      className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                                    />
-                                  </PaginationItem>
-                                </PaginationContent>
-                              </Pagination>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+                          ) : (
+                            <>
+                              <div className="overflow-x-auto w-full border border-border/60 rounded-lg">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="w-[120px] sm:w-[140px]">Employee ID</TableHead>
+                                      <TableHead className="min-w-[140px]">Name</TableHead>
+                                      <TableHead className="min-w-[110px]">Department</TableHead>
+                                      <TableHead className="min-w-[200px]">Assign Projects</TableHead>
+                                      <TableHead className="text-right min-w-[140px]">Actions</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {paginatedEmployees.map((employee) => {
+                                      const employeeProjects = (employee.assignedProjects && employee.assignedProjects.length > 0)
+                                        ? employee.assignedProjects
+                                        : projects.filter((proj) => isEmployeeAssigned(proj, employee));
+
+                                      return (
+                                        <TableRow key={employee.id || employee._id}>
+                                          <TableCell className="font-mono">
+                                            <Badge variant="outline">{employee.employeeId}</Badge>
+                                          </TableCell>
+                                          <TableCell className="font-medium text-foreground">
+                                            <div className="flex items-center gap-3">
+                                              <div className="h-8 w-8 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden shadow-xs">
+                                                {employee.avatar ? (
+                                                  <img src={employee.avatar} alt={employee.name} className="h-full w-full object-cover" />
+                                                ) : (
+                                                  employee.name ? employee.name.charAt(0).toUpperCase() : "E"
+                                                )}
+                                              </div>
+                                              <span>{employee.name}</span>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge variant="secondary">{employee.department}</Badge>
+                                          </TableCell>
+                                          <TableCell>
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                              {employeeProjects.slice(0, 2).map((proj) => (
+                                                <Badge
+                                                  key={proj.id || proj._id}
+                                                  variant="outline"
+                                                  className="text-[11px] bg-primary/5 text-primary border-primary/20 font-normal"
+                                                >
+                                                  {proj.name}
+                                                </Badge>
+                                              ))}
+                                              {employeeProjects.length > 2 && (
+                                                <Badge variant="secondary" className="text-[10px]">
+                                                  +{employeeProjects.length - 2} more
+                                                </Badge>
+                                              )}
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-7 text-xs px-2.5 gap-1.5 hover:bg-primary hover:text-primary-foreground transition-colors"
+                                                onClick={() => {
+                                                  setAssigningEmployeeProjects(employee);
+                                                  setProjectSearchQuery("");
+                                                }}
+                                              >
+                                                <Briefcase className="h-3 w-3" />
+                                                {employeeProjects.length === 0 ? "Assign Projects" : "Manage Projects"}
+                                              </Button>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-2">
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => handleEditEmployee(employee)}
+                                              >
+                                                <Edit3 className="mr-1.5 h-3.5 w-3.5" /> Edit
+                                              </Button>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                onClick={() => setDeletingEmployee(employee)}
+                                              >
+                                                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
+                                              </Button>
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                  </TableBody>
+                                </Table>
+                              </div>
+
+                              {/* Pagination Controls */}
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-4 mt-4">
+                                <div className="flex flex-wrap items-center gap-4">
+                                  <div className="text-xs text-muted-foreground">
+                                    Showing {totalEmployeesCount === 0 ? 0 : startIndex + 1}-{Math.min(startIndex + itemsPerPage, totalEmployeesCount)} of {totalEmployeesCount} employees
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground border-l border-border pl-4">
+                                    <span>Rows per page:</span>
+                                    <select
+                                      value={itemsPerPage}
+                                      onChange={(e) => {
+                                        setItemsPerPage(Number(e.target.value));
+                                        setCurrentPage(1);
+                                      }}
+                                      className="bg-background border border-input rounded-md px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer shadow-xs"
+                                    >
+                                      {[5, 6, 7, 8, 9, 10].map((num) => (
+                                        <option key={num} value={num}>
+                                          {num}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                                {totalPages > 1 && (
+                                  <Pagination className="w-auto mx-0">
+                                    <PaginationContent>
+                                      <PaginationItem>
+                                        <PaginationPrevious
+                                          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                                          disabled={currentPage === 1}
+                                          className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                        />
+                                      </PaginationItem>
+                                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                                        <PaginationItem key={page}>
+                                          <PaginationLink
+                                            isActive={page === currentPage}
+                                            onClick={() => setCurrentPage(page)}
+                                            className="cursor-pointer"
+                                          >
+                                            {page}
+                                          </PaginationLink>
+                                        </PaginationItem>
+                                      ))}
+                                      <PaginationItem>
+                                        <PaginationNext
+                                          onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                                          disabled={currentPage === totalPages}
+                                          className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                        />
+                                      </PaginationItem>
+                                    </PaginationContent>
+                                  </Pagination>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  }
+                />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
 
             </main>
           </div>

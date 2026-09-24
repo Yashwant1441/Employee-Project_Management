@@ -420,7 +420,17 @@ export function ProjectsView({
   currentUser = null,
 }) {
   const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(6);
+  const [totalProjectsCount, setTotalProjectsCount] = useState(0);
+  const [totalPagesCount, setTotalPagesCount] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const ITEMS_PER_PAGE = itemsPerPage;
+  const filteredProjects = projects;
+  const totalPages = totalPagesCount;
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedProjects = projects;
+
   const [selectedProject, setSelectedProject] = useState(null);
   const [viewMode, setViewMode] = useState("grid");
   const [activeFolder, setActiveFolder] = useState("/");
@@ -444,48 +454,63 @@ export function ProjectsView({
     }
   }, [selectedProject]);
 
-  const prevProjSearchRef = useRef("");
+  const lastFetchedKeyRef = useRef("");
 
-  useEffect(() => {
-    if (!searchQuery.trim() && !prevProjSearchRef.current) return;
+  const fetchProjects = async (page = currentPage, limit = itemsPerPage, search = searchQuery, force = false) => {
+    const key = `${page}-${limit}-${search.trim()}`;
+    if (!force && lastFetchedKeyRef.current === key) {
+      return;
+    }
+    lastFetchedKeyRef.current = key;
 
-    const isClearing = !searchQuery.trim() && prevProjSearchRef.current;
-    prevProjSearchRef.current = searchQuery.trim();
+    const token = localStorage.getItem("app_token");
+    const authHeaders = {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
 
-    const controller = new AbortController();
-
-    const timer = setTimeout(async () => {
-      const token = localStorage.getItem("app_token");
-      const authHeaders = {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      };
-
-      try {
-        const url = searchQuery.trim()
-          ? `${API_BASE_URL}/api/projects?search=${encodeURIComponent(searchQuery.trim())}`
-          : `${API_BASE_URL}/api/projects`;
-
-        const res = await fetch(url, {
-          headers: authHeaders,
-          signal: controller.signal,
-        });
-        const data = await res.json();
-        if (data && Array.isArray(data.projects)) {
-          setProjects(data.projects);
+    try {
+      const url = `${API_BASE_URL}/api/projects?page=${page}&limit=${limit}&search=${encodeURIComponent(search.trim())}`;
+      const res = await fetch(url, { headers: authHeaders });
+      const data = await res.json();
+      if (data && Array.isArray(data.projects)) {
+        setProjects(data.projects);
+        if (data.pagination) {
+          setTotalProjectsCount(data.pagination.totalProjects);
+          setTotalPagesCount(data.pagination.totalPages);
+        } else {
+          setTotalProjectsCount(data.projects.length);
+          setTotalPagesCount(Math.ceil(data.projects.length / limit) || 1);
         }
-      } catch (err) {
-        if (err.name !== "AbortError") {
-          console.error("Failed to search projects:", err);
+        if (Array.isArray(data.statuses) && data.statuses.length > 0 && setStatuses) {
+          setStatuses(data.statuses);
         }
       }
-    }, isClearing ? 0 : 1000);
+    } catch (err) {
+      console.error("Failed to fetch projects:", err);
+      lastFetchedKeyRef.current = "";
+    }
+  };
 
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [searchQuery, setProjects]);
+  const isFirstMountRef = useRef(true);
+
+  useEffect(() => {
+    fetchProjects(currentPage, itemsPerPage, searchQuery);
+  }, [currentPage, itemsPerPage]);
+
+  useEffect(() => {
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setCurrentPage(1);
+      fetchProjects(1, itemsPerPage, searchQuery);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const formatFileSize = (bytes) => {
     if (!bytes || isNaN(bytes) || bytes <= 0) return "0 KB";
@@ -951,27 +976,7 @@ export function ProjectsView({
     ])
   );
 
-  const ITEMS_PER_PAGE = 9;
 
-  // Filter projects by search
-  const filteredProjects = projects.filter((project) => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      (project.name && project.name.toLowerCase().includes(q)) ||
-      (project.clientName && project.clientName.toLowerCase().includes(q)) ||
-      (project.language && project.language.toLowerCase().includes(q)) ||
-      (project.deploymentLocation &&
-        project.deploymentLocation.toLowerCase().includes(q))
-    );
-  });
-
-  const totalPages = Math.ceil(filteredProjects.length / ITEMS_PER_PAGE) || 1;
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const paginatedProjects = filteredProjects.slice(
-    startIndex,
-    startIndex + ITEMS_PER_PAGE
-  );
 
   const handleOpenAdd = () => {
     setEditingProject(null);
@@ -1278,6 +1283,7 @@ export function ProjectsView({
           ]
         };
         setProjects((prev) => [newProjectObj, ...prev]);
+        fetchProjects(currentPage, itemsPerPage, searchQuery, true);
         setNotificationModal({
           isOpen: true,
           title: "Project Created Successfully",
@@ -1313,6 +1319,7 @@ export function ProjectsView({
       if (res.ok) {
         const delId = deletingProject.id || deletingProject._id;
         setProjects((prev) => prev.filter((p) => (p.id || p._id) !== delId));
+        fetchProjects(currentPage, itemsPerPage, searchQuery, true);
         if (selectedProject && (selectedProject.id || selectedProject._id) === delId) {
           setSelectedProject(null);
         }
@@ -1451,7 +1458,7 @@ export function ProjectsView({
           </div>
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            Showing <span className="font-semibold text-foreground">{filteredProjects.length}</span> Total Projects
+            Showing <span className="font-semibold text-foreground">{totalProjectsCount}</span> Total Projects
           </div>
         </div>
       </div>
@@ -1535,11 +1542,11 @@ export function ProjectsView({
           {/* Pagination Controls */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-6 mt-4">
             <div className="text-xs text-muted-foreground">
-              Showing <span className="font-semibold text-foreground">{startIndex + 1}</span> to{" "}
+              Showing <span className="font-semibold text-foreground">{totalProjectsCount === 0 ? 0 : startIndex + 1}</span> to{" "}
               <span className="font-semibold text-foreground">
-                {Math.min(startIndex + ITEMS_PER_PAGE, filteredProjects.length)}
+                {Math.min(startIndex + itemsPerPage, totalProjectsCount)}
               </span>{" "}
-              of <span className="font-semibold text-foreground">{filteredProjects.length}</span> projects (Page {currentPage} of {totalPages})
+              of <span className="font-semibold text-foreground">{totalProjectsCount}</span> projects (Page {currentPage} of {totalPages})
             </div>
 
             {totalPages > 1 && (
