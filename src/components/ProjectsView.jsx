@@ -454,14 +454,29 @@ export function ProjectsView({
     }
   }, [selectedProject]);
 
-  const lastFetchedKeyRef = useRef("");
+  const projPageCacheRef = useRef({});
 
   const fetchProjects = async (page = currentPage, limit = itemsPerPage, search = searchQuery, force = false) => {
     const key = `${page}-${limit}-${search.trim()}`;
-    if (!force && lastFetchedKeyRef.current === key) {
+    if (force) {
+      projPageCacheRef.current = {};
+    } else if (projPageCacheRef.current[key]) {
+      const data = projPageCacheRef.current[key];
+      if (data && Array.isArray(data.projects)) {
+        setProjects(data.projects);
+        if (data.pagination) {
+          setTotalProjectsCount(data.pagination.totalProjects);
+          setTotalPagesCount(data.pagination.totalPages);
+        } else {
+          setTotalProjectsCount(data.projects.length);
+          setTotalPagesCount(Math.ceil(data.projects.length / limit) || 1);
+        }
+        if (Array.isArray(data.statuses) && data.statuses.length > 0 && setStatuses) {
+          setStatuses(data.statuses);
+        }
+      }
       return;
     }
-    lastFetchedKeyRef.current = key;
 
     const token = localStorage.getItem("app_token");
     const authHeaders = {
@@ -473,7 +488,8 @@ export function ProjectsView({
       const url = `${API_BASE_URL}/api/projects?page=${page}&limit=${limit}&search=${encodeURIComponent(search.trim())}`;
       const res = await fetch(url, { headers: authHeaders });
       const data = await res.json();
-      if (data && Array.isArray(data.projects)) {
+      if (res.ok && data && Array.isArray(data.projects)) {
+        projPageCacheRef.current[key] = data;
         setProjects(data.projects);
         if (data.pagination) {
           setTotalProjectsCount(data.pagination.totalProjects);
@@ -488,7 +504,6 @@ export function ProjectsView({
       }
     } catch (err) {
       console.error("Failed to fetch projects:", err);
-      lastFetchedKeyRef.current = "";
     }
   };
 

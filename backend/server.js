@@ -16,6 +16,7 @@ const upload = require("./middleware/upload");
 const documentUpload = require("./middleware/documentUpload");
 const multer = require("multer");
 const { uploadStream } = require("./config/cloudinary");
+const Groq = require("groq-sdk");
 
 const app = express();
 app.use(
@@ -1020,6 +1021,43 @@ app.post("/api/register", async (req, res) => {
     } catch (error) {
         res.status(500).json({
             message: "Failed to create user account",
+            error: error.message
+        });
+    }
+});
+
+// AI Chatbot Conversational Assistant Route (Groq API - Q&A Only)
+app.post("/api/chat", requireAuth, async (req, res) => {
+    try {
+        const { messages } = req.body;
+        if (!messages || !Array.isArray(messages)) {
+            return res.status(400).json({ message: "Messages array is required." });
+        }
+
+        const systemPrompt = {
+            role: "system",
+            content: `You are an intelligent, polite, and helpful AI Assistant for the Employee & Project Management Portal (Apex System).
+Your goal is to answer user questions about employee management, project tracking, system navigation, and workplace productivity.
+Provide clear, accurate, and concise responses. Use markdown formatting (bolding, lists, code snippets) where appropriate to make answers readable.`
+        };
+
+        const groqMessages = [systemPrompt, ...messages];
+        const groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+        const completion = await groqClient.chat.completions.create({
+            messages: groqMessages,
+            model: "openai/gpt-oss-120b",
+            temperature: 0.7,
+            max_completion_tokens: 1024,
+        });
+
+        const reply = completion.choices[0]?.message?.content || "I couldn't process your request right now.";
+
+        res.status(200).json({ reply });
+    } catch (error) {
+        console.error("Groq Conversational Chat Error:", error);
+        res.status(500).json({
+            message: "Failed to communicate with AI Assistant.",
             error: error.message
         });
     }

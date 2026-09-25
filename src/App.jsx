@@ -1,5 +1,6 @@
 import "./App.css";
 import API_BASE_URL from "./api";
+import AIChatBot from "./components/AIChatBot";
 import { useEffect, useState, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -211,15 +212,37 @@ function App() {
 
   const allEmployeesRef = useRef([]);
 
-  const lastFetchedEmpKeyRef = useRef("");
+  const empPageCacheRef = useRef({});
 
   const fetchEmployees = async (page = currentPage, limit = itemsPerPage, search = searchQuery, force = false) => {
     if (!isLoggedIn) return;
     const key = `${page}-${limit}-${search.trim()}`;
-    if (!force && lastFetchedEmpKeyRef.current === key) {
+
+    if (force) {
+      empPageCacheRef.current = {};
+    } else if (empPageCacheRef.current[key]) {
+      const cachedData = empPageCacheRef.current[key];
+      let list = [];
+      if (cachedData && Array.isArray(cachedData.employees)) {
+        list = cachedData.employees;
+        if (Array.isArray(cachedData.projects)) {
+          setProjects(cachedData.projects);
+        }
+      } else if (Array.isArray(cachedData)) {
+        list = cachedData;
+      }
+      allEmployeesRef.current = list;
+      setEmployees(list);
+      if (cachedData.pagination) {
+        setTotalEmployeesCount(cachedData.pagination.totalEmployees);
+        setTotalPagesCount(cachedData.pagination.totalPages);
+      } else {
+        setTotalEmployeesCount(list.length);
+        setTotalPagesCount(Math.ceil(list.length / limit) || 1);
+      }
+      setHasFetchedEmployees(true);
       return;
     }
-    lastFetchedEmpKeyRef.current = key;
 
     const token = localStorage.getItem("app_token");
     const authHeaders = {
@@ -231,6 +254,11 @@ function App() {
       const url = `${API_BASE_URL}/api/employees?page=${page}&limit=${limit}&search=${encodeURIComponent(search.trim())}`;
       const response = await fetch(url, { headers: authHeaders });
       const data = await response.json();
+      
+      if (response.ok) {
+        empPageCacheRef.current[key] = data;
+      }
+
       let list = [];
       if (data && Array.isArray(data.employees)) {
         list = data.employees;
@@ -261,7 +289,6 @@ function App() {
       });
     } catch (error) {
       console.log("Failed to fetch employees:", error);
-      lastFetchedEmpKeyRef.current = "";
     }
   };
 
@@ -1550,6 +1577,7 @@ function App() {
           id={notificationModal.id}
           name={notificationModal.name}
         />
+        <AIChatBot />
       </SidebarProvider>
     );
   }
