@@ -508,13 +508,19 @@ export function ProjectsView({
       if (res.ok && data.timelyUpdates) {
         setTimelyUpdates(data.timelyUpdates);
         setSelectedProject((prev) => (prev ? { ...prev, timelyUpdates: data.timelyUpdates } : null));
+        setProjects((prev) =>
+          prev.map((proj) =>
+            (proj.id || proj._id) === pId
+              ? { ...proj, timelyUpdates: data.timelyUpdates }
+              : proj
+          )
+        );
         setTimelyForm({
           title: "",
           category: "observation",
           description: "",
           date: new Date().toISOString().split("T")[0],
         });
-        fetchProjects(currentPage, itemsPerPage, searchQuery, true);
       } else {
         alert(data.message || "Failed to log update.");
       }
@@ -526,6 +532,7 @@ export function ProjectsView({
   };
 
   const projPageCacheRef = useRef({});
+  const isFetchingProjectsRef = useRef(false);
 
   const fetchProjects = async (page = currentPage, limit = itemsPerPage, search = searchQuery, force = false) => {
     const key = `${page}-${limit}-${search.trim()}`;
@@ -548,6 +555,9 @@ export function ProjectsView({
       }
       return;
     }
+
+    if (isFetchingProjectsRef.current && !force) return;
+    isFetchingProjectsRef.current = true;
 
     const token = localStorage.getItem("app_token");
     const authHeaders = {
@@ -575,6 +585,8 @@ export function ProjectsView({
       }
     } catch (err) {
       console.error("Failed to fetch projects:", err);
+    } finally {
+      isFetchingProjectsRef.current = false;
     }
   };
 
