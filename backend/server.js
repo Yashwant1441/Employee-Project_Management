@@ -762,6 +762,19 @@ app.post("/api/projects/:id/documents", requireAuth, documentUpload.array("files
             project.documents = [];
         }
         project.documents.push(...newDocs);
+
+        if (!project.timelyUpdates) {
+            project.timelyUpdates = [];
+        }
+        project.timelyUpdates.unshift({
+            title: `Uploaded ${newDocs.length} Document(s)`,
+            description: `Attached files: ${newDocs.map(d => d.name).join(", ")}`,
+            category: "system",
+            date: new Date(),
+            loggedBy: userEmail,
+            createdAt: new Date()
+        });
+
         await project.save();
 
         res.status(200).json({
@@ -799,6 +812,65 @@ app.delete("/api/projects/:id/documents/:docId", requireAuth, async (req, res) =
             message: "Failed to delete document",
             error: error.message,
         });
+    }
+});
+
+// GET Timely Updates (Observations & Cases) for a project
+app.get("/api/projects/:id/timely-updates", requireAuth, async (req, res) => {
+    try {
+        const project = await Project.findOne({ _id: req.params.id, userId: req.userId });
+        if (!project) {
+            return res.status(404).json({ message: "Project not found or unauthorized" });
+        }
+        res.status(200).json({
+            timelyUpdates: project.timelyUpdates || []
+        });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to fetch timely updates", error: error.message });
+    }
+});
+
+// POST a new Timely Update (Observation / Case) for a project
+app.post("/api/projects/:id/timely-updates", requireAuth, async (req, res) => {
+    try {
+        const { title, description, category, date } = req.body;
+        if (!title || !title.trim()) {
+            return res.status(400).json({ message: "Title is required for timely update." });
+        }
+
+        const project = await Project.findOne({ _id: req.params.id, userId: req.userId });
+        if (!project) {
+            return res.status(404).json({ message: "Project not found or unauthorized" });
+        }
+
+        let userEmail = "User";
+        try {
+            const u = await User.findById(req.userId);
+            if (u && u.email) userEmail = u.email;
+        } catch (e) { }
+
+        if (!project.timelyUpdates) {
+            project.timelyUpdates = [];
+        }
+
+        const newUpdate = {
+            title: title.trim(),
+            description: (description || "").trim(),
+            category: category || "observation",
+            date: date ? new Date(date) : new Date(),
+            loggedBy: userEmail,
+            createdAt: new Date()
+        };
+
+        project.timelyUpdates.unshift(newUpdate);
+        await project.save();
+
+        res.status(201).json({
+            message: "Timely update logged successfully",
+            timelyUpdates: project.timelyUpdates
+        });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to log timely update", error: error.message });
     }
 });
 
@@ -1058,14 +1130,14 @@ app.post("/api/chat", requireAuth, async (req, res) => {
                     .lean();
 
                 const userProjects = await Project.find({ userId })
-                    .select("name clientName status allottedHours assignedEmployees database language theme deploymentLocation extraRequirements startDate endDate documents")
+                    .select("name clientName status allottedHours assignedEmployees database language theme deploymentLocation extraRequirements startDate endDate documents timelyUpdates")
                     .lean();
 
                 totalEmployees = userEmployees.length;
                 totalProjects = userProjects.length;
 
                 if (userEmployees.length > 0) {
-                    empSummaryText = userEmployees.map(e => 
+                    empSummaryText = userEmployees.map(e =>
                         `- Name: ${e.name} | ID: ${e.employeeId} | Dept: ${e.department}`
                     ).join("\n");
                 }
@@ -1087,7 +1159,7 @@ app.post("/api/chat", requireAuth, async (req, res) => {
                                                     Project.updateOne(
                                                         { _id: p._id, "documents._id": d._id },
                                                         { $set: { "documents.$.extractedText": fullText } }
-                                                    ).exec().catch(() => {});
+                                                    ).exec().catch(() => { });
                                                 }
                                             }
                                         } catch (err) {
@@ -1138,14 +1210,23 @@ app.post("/api/chat", requireAuth, async (req, res) => {
 
                             docsAnalysis = p.documents.map(d => {
                                 const folderLoc = (d.folderPath && d.folderPath !== "/") ? ` [Folder: "${d.folderPath}"]` : " [Folder: Root /]";
-                                const textContent = d.extractedText 
-                                    ? `\n  - Document Content ("${d.name}" in ${folderLoc}): """${d.extractedText.substring(0, 6000)}"""` 
+                                const textContent = d.extractedText
+                                    ? `\n  - Document Content ("${d.name}" in ${folderLoc}): """${d.extractedText.substring(0, 6000)}"""`
                                     : "";
                                 return `[File: "${d.name}"${folderLoc}, Type: ${d.fileType || 'file'}${textContent}]`;
                             }).join("\n  ");
                         }
 
-                        return `- Project: "${p.name}" | Client: ${p.clientName} | Status: ${p.status || 'Pending'} | Total Allotted Hours: ${p.allottedHours || 0}${timelineAnalysis} | Theme: ${p.theme || 'Default'} | Deployment Location: ${p.deploymentLocation || 'Not Specified'} | Language: ${p.language || 'N/A'} | Database: ${p.database || 'N/A'} | Extra Reqs: ${p.extraRequirements || 'None'} | Timeline: ${startStr} to ${endStr} | Team Assigned: ${assignedStr}\n  - Uploaded Folder Structure: ${folderTreeAnalysis}\n  - Attached Project Documents & Files:\n  ${docsAnalysis}`;
+                        let updatesAnalysis = "No timely updates logged yet.";
+                        if (Array.isArray(p.timelyUpdates) && p.timelyUpdates.length > 0) {
+                            updatesAnalysis = p.timelyUpdates.map(u => {
+                                const dateStr = u.date ? new Date(u.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A';
+                                const descStr = u.description ? ` - Details: ${u.description}` : '';
+                                return `[${(u.category || 'observation').toUpperCase()}: "${u.title}" | Date: ${dateStr} | Logged by: ${u.loggedBy || 'User'}${descStr}]`;
+                            }).join("\n    ");
+                        }
+
+                        return `- Project: "${p.name}" | Client: ${p.clientName} | Status: ${p.status || 'Pending'} | Total Allotted Hours: ${p.allottedHours || 0}${timelineAnalysis} | Theme: ${p.theme || 'Default'} | Deployment Location: ${p.deploymentLocation || 'Not Specified'} | Language: ${p.language || 'N/A'} | Database: ${p.database || 'N/A'} | Extra Reqs: ${p.extraRequirements || 'None'} | Timeline: ${startStr} to ${endStr} | Team Assigned: ${assignedStr}\n  - Timely Updates (Observations & Cases):\n    ${updatesAnalysis}\n  - Uploaded Folder Structure: ${folderTreeAnalysis}\n  - Attached Project Documents & Files:\n  ${docsAnalysis}`;
                     }).join("\n");
                 }
             } catch (e) { }

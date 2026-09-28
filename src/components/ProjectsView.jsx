@@ -85,6 +85,9 @@ import {
   Workflow,
   LayoutGrid,
   Kanban,
+  AlertCircle,
+  CheckCircle2,
+  MessageSquare,
 } from "lucide-react";
 
 const PROJECT_ICON_PRESETS = [
@@ -443,16 +446,84 @@ export function ProjectsView({
   const [deletingDocument, setDeletingDocument] = useState(null);
   const [activities, setActivities] = useState([]);
   const [isLoadingActivities, setIsLoadingActivities] = useState(false);
+  const [showTimelyUpdatesModal, setShowTimelyUpdatesModal] = useState(false);
+  const [timelyUpdates, setTimelyUpdates] = useState([]);
+  const [isLoadingTimelyUpdates, setIsLoadingTimelyUpdates] = useState(false);
+  const [timelyForm, setTimelyForm] = useState({
+    title: "",
+    category: "observation",
+    description: "",
+    date: new Date().toISOString().split("T")[0],
+  });
+  const [isSubmittingUpdate, setIsSubmittingUpdate] = useState(false);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
 
   useEffect(() => {
     if (selectedProject) {
       setActivities(selectedProject.activities || []);
+      setTimelyUpdates(selectedProject.timelyUpdates || []);
     } else {
       setActivities([]);
+      setTimelyUpdates([]);
     }
   }, [selectedProject]);
+
+  const fetchTimelyUpdates = async (projectId) => {
+    if (!projectId) return;
+    setIsLoadingTimelyUpdates(true);
+    try {
+      const token = localStorage.getItem("app_token");
+      const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/timely-updates`, {
+        headers: { Authorization: token ? `Bearer ${token}` : "" },
+      });
+      const data = await res.json();
+      if (res.ok && data.timelyUpdates) {
+        setTimelyUpdates(data.timelyUpdates);
+        setSelectedProject((prev) => (prev ? { ...prev, timelyUpdates: data.timelyUpdates } : null));
+      }
+    } catch (err) {
+      console.error("Failed to fetch timely updates:", err);
+    } finally {
+      setIsLoadingTimelyUpdates(false);
+    }
+  };
+
+  const handleCreateTimelyUpdate = async (e) => {
+    e.preventDefault();
+    if (!timelyForm.title.trim() || !selectedProject) return;
+    setIsSubmittingUpdate(true);
+    try {
+      const token = localStorage.getItem("app_token");
+      const pId = selectedProject.id || selectedProject._id;
+      const res = await fetch(`${API_BASE_URL}/api/projects/${pId}/timely-updates`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify(timelyForm),
+      });
+      const data = await res.json();
+      if (res.ok && data.timelyUpdates) {
+        setTimelyUpdates(data.timelyUpdates);
+        setSelectedProject((prev) => (prev ? { ...prev, timelyUpdates: data.timelyUpdates } : null));
+        setTimelyForm({
+          title: "",
+          category: "observation",
+          description: "",
+          date: new Date().toISOString().split("T")[0],
+        });
+        fetchProjects(currentPage, itemsPerPage, searchQuery, true);
+      } else {
+        alert(data.message || "Failed to log update.");
+      }
+    } catch (err) {
+      console.error("Timely update create error:", err);
+    } finally {
+      setIsSubmittingUpdate(false);
+    }
+  };
 
   const projPageCacheRef = useRef({});
 
@@ -1638,6 +1709,23 @@ export function ProjectsView({
                       </SheetDescription>
                     </div>
                   </div>
+
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      fetchTimelyUpdates(selectedProject.id || selectedProject._id);
+                      setShowTimelyUpdatesModal(true);
+                    }}
+                    className="w-full mt-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-md font-medium text-xs flex items-center justify-between py-2 px-3.5 rounded-xl border border-amber-400/30 transition-all hover:scale-[1.01]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      <span>Timely Updates (Observations & Cases)</span>
+                    </div>
+                    <Badge variant="secondary" className="bg-white/20 text-white border-none font-bold text-[11px] px-2 py-0.5">
+                      {selectedProject.timelyUpdates?.length || 0}
+                    </Badge>
+                  </Button>
                 </SheetHeader>
 
                 <div className="space-y-6 py-6 text-sm">
@@ -2101,6 +2189,166 @@ export function ProjectsView({
               </>
             );
           })()}
+        </SheetContent>
+      </Sheet>
+
+      {/* TIMELY UPDATES (OBSERVATIONS & CASES) SECONDARY SIDEBAR SHEET */}
+      <Sheet open={showTimelyUpdatesModal} onOpenChange={(open) => setShowTimelyUpdatesModal(open)}>
+        <SheetContent side="right" className="w-full sm:max-w-md md:max-w-lg max-h-[100vh] overflow-y-auto p-4 sm:p-6 bg-card text-card-foreground">
+          <SheetHeader className="border-b border-border pb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <SheetTitle className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                  Timely Updates
+                </SheetTitle>
+                <SheetDescription className="text-xs font-medium text-muted-foreground mt-0.5">
+                  Observations & Cases for <span className="font-semibold text-foreground">{selectedProject?.name}</span>
+                </SheetDescription>
+              </div>
+            </div>
+          </SheetHeader>
+
+          <div className="space-y-6 py-4">
+            {/* FORM TO ADD NEW OBSERVATION / CASE */}
+            <Card className="border border-border/80 shadow-xs bg-muted/30">
+              <CardHeader className="py-3 px-4 border-b border-border/50 bg-muted/50">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Plus className="w-4 h-4 text-primary" /> Log New Observation or Case
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3 text-xs">
+                <form onSubmit={handleCreateTimelyUpdate} className="space-y-3">
+                  <div>
+                    <Label className="text-xs font-medium text-foreground">Title *</Label>
+                    <Input
+                      value={timelyForm.title}
+                      onChange={(e) => setTimelyForm({ ...timelyForm, title: e.target.value })}
+                      placeholder="e.g. Next.js image optimization observation or Payment gateway issue"
+                      className="text-xs mt-1 h-8 rounded-lg"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs font-medium text-foreground">Category *</Label>
+                      <select
+                        value={timelyForm.category}
+                        onChange={(e) => setTimelyForm({ ...timelyForm, category: e.target.value })}
+                        className="w-full mt-1 h-8 text-xs rounded-lg border border-input bg-background px-2.5 py-1 text-foreground shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <option value="observation">💡 Observation (Note/Insight)</option>
+                        <option value="case">🚨 Case (Issue/Incident)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-medium text-foreground">Date *</Label>
+                      <Input
+                        type="date"
+                        value={timelyForm.date}
+                        onChange={(e) => setTimelyForm({ ...timelyForm, date: e.target.value })}
+                        className="text-xs mt-1 h-8 rounded-lg"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-medium text-foreground">Description / Details</Label>
+                    <textarea
+                      value={timelyForm.description}
+                      onChange={(e) => setTimelyForm({ ...timelyForm, description: e.target.value })}
+                      placeholder="Detailed findings, steps taken, or observation notes..."
+                      rows={3}
+                      className="w-full mt-1 text-xs rounded-lg border border-input bg-background p-2.5 text-foreground shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    disabled={isSubmittingUpdate || !timelyForm.title.trim()}
+                    className="w-full h-8 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg gap-1.5"
+                  >
+                    {isSubmittingUpdate ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-3.5 h-3.5" /> Submit Timely Update
+                      </>
+                    )}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            {/* TIMELINE FEED LIST OF ENTRIES */}
+            <div className="space-y-3">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-primary" /> Timely History & Logs ({timelyUpdates.length})
+                </span>
+                {isLoadingTimelyUpdates && <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />}
+              </div>
+
+              {timelyUpdates.length === 0 ? (
+                <div className="text-center py-8 px-4 rounded-xl border border-dashed border-border bg-muted/20 text-muted-foreground text-xs">
+                  No timely updates logged yet for this project. Use the form above to add an observation or case!
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                  {timelyUpdates.map((item, idx) => {
+                    const category = item.category || "observation";
+                    const isCase = category === "case";
+                    const isSystem = category === "system";
+
+                    return (
+                      <div
+                        key={idx}
+                        className="p-3.5 rounded-xl border border-border/70 bg-card hover:bg-accent/40 transition-colors space-y-2 text-xs shadow-xs"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] font-semibold uppercase px-2 py-0.5 border ${
+                                isCase
+                                  ? "bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400"
+                                  : isSystem
+                                  ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400"
+                                  : "bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400"
+                              }`}
+                            >
+                              {isCase ? "🚨 Case" : isSystem ? "⚡ System" : "💡 Observation"}
+                            </Badge>
+                            <span className="font-semibold text-foreground text-sm leading-tight">
+                              {item.title}
+                            </span>
+                          </div>
+                        </div>
+
+                        {item.description && (
+                          <p className="text-muted-foreground text-xs leading-relaxed whitespace-pre-wrap pl-1 border-l-2 border-primary/20">
+                            {item.description}
+                          </p>
+                        )}
+
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border/40">
+                          <span>Logged by: <strong className="text-foreground">{item.loggedBy || "User"}</strong></span>
+                          <span>{item.date ? new Date(item.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </SheetContent>
       </Sheet>
 

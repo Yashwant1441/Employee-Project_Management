@@ -83,6 +83,16 @@ const projectSchema = new mongoose.Schema(
         createdAt: { type: Date, default: Date.now },
       },
     ],
+    timelyUpdates: [
+      {
+        title: { type: String, required: true },
+        description: { type: String, default: "" },
+        category: { type: String, enum: ["observation", "case", "system"], default: "observation" },
+        date: { type: Date, default: Date.now },
+        loggedBy: { type: String, default: "User" },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
