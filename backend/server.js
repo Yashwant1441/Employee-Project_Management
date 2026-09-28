@@ -17,6 +17,7 @@ const documentUpload = require("./middleware/documentUpload");
 const multer = require("multer");
 const { uploadStream } = require("./config/cloudinary");
 const Groq = require("groq-sdk");
+const { extractTextFromBuffer } = require("./utils/documentParser");
 
 const app = express();
 app.use(
@@ -737,6 +738,12 @@ app.post("/api/projects/:id/documents", requireAuth, documentUpload.array("files
 
             const uploadRes = await uploadStream(file.buffer, "project_documents");
             const ext = file.originalname.split(".").pop().toLowerCase();
+            let extractedText = "";
+            try {
+                extractedText = await extractTextFromBuffer(file.buffer, file.originalname);
+            } catch (err) {
+                console.error("Text extraction warning:", err.message);
+            }
 
             newDocs.push({
                 name: file.originalname,
@@ -747,6 +754,7 @@ app.post("/api/projects/:id/documents", requireAuth, documentUpload.array("files
                 public_id: uploadRes.public_id,
                 uploadedBy: userEmail,
                 uploadedAt: new Date(),
+                extractedText: extractedText || "",
             });
         }
 
@@ -1050,7 +1058,7 @@ app.post("/api/chat", requireAuth, async (req, res) => {
                     .lean();
 
                 const userProjects = await Project.find({ userId })
-                    .select("name clientName status allottedHours assignedEmployees database language theme deploymentLocation extraRequirements startDate endDate")
+                    .select("name clientName status allottedHours assignedEmployees database language theme deploymentLocation extraRequirements startDate endDate documents")
                     .lean();
 
                 totalEmployees = userEmployees.length;
@@ -1063,6 +1071,34 @@ app.post("/api/chat", requireAuth, async (req, res) => {
                 }
 
                 if (userProjects.length > 0) {
+                    for (const p of userProjects) {
+                        if (Array.isArray(p.documents) && p.documents.length > 0) {
+                            for (const d of p.documents) {
+                                if (!d.extractedText || d.extractedText.length < 1000) {
+                                    if (d.fileUrl) {
+                                        try {
+                                            const resp = await fetch(d.fileUrl);
+                                            if (resp.ok) {
+                                                const arrayBuf = await resp.arrayBuffer();
+                                                const buf = Buffer.from(arrayBuf);
+                                                const fullText = await extractTextFromBuffer(buf, d.name);
+                                                if (fullText && fullText.length > (d.extractedText || "").length) {
+                                                    d.extractedText = fullText;
+                                                    Project.updateOne(
+                                                        { _id: p._id, "documents._id": d._id },
+                                                        { $set: { "documents.$.extractedText": fullText } }
+                                                    ).exec().catch(() => {});
+                                                }
+                                            }
+                                        } catch (err) {
+                                            console.error("On-the-fly document fetch warning:", err.message);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     projSummaryText = userProjects.map(p => {
                         const assignedStr = Array.isArray(p.assignedEmployees) && p.assignedEmployees.length > 0
                             ? p.assignedEmployees.join(", ")
@@ -1085,7 +1121,31 @@ app.post("/api/chat", requireAuth, async (req, res) => {
                             timelineAnalysis = ` | Total Duration: ${totalDurationDays} days | Days Remaining: ${daysRemaining} days | Est. Remaining Hours (Schedule-based): ~${estRemainingHours} hours (out of ${totalHours} hrs)`;
                         }
 
-                        return `- Project: "${p.name}" | Client: ${p.clientName} | Status: ${p.status || 'Pending'} | Total Allotted Hours: ${p.allottedHours || 0}${timelineAnalysis} | Theme: ${p.theme || 'Default'} | Deployment Location: ${p.deploymentLocation || 'Not Specified'} | Language: ${p.language || 'N/A'} | Database: ${p.database || 'N/A'} | Extra Reqs: ${p.extraRequirements || 'None'} | Timeline: ${startStr} to ${endStr} | Team Assigned: ${assignedStr}`;
+                        let docsAnalysis = "None";
+                        let folderTreeAnalysis = "None";
+
+                        if (Array.isArray(p.documents) && p.documents.length > 0) {
+                            const folderGroups = {};
+                            p.documents.forEach(d => {
+                                const folderName = (d.folderPath && d.folderPath !== "/") ? d.folderPath : "/ (Root Directory)";
+                                if (!folderGroups[folderName]) folderGroups[folderName] = [];
+                                folderGroups[folderName].push(d.name);
+                            });
+
+                            folderTreeAnalysis = Object.keys(folderGroups).map(f => {
+                                return `Folder "${f}": ${folderGroups[f].length} file(s) [${folderGroups[f].join(", ")}]`;
+                            }).join("; ");
+
+                            docsAnalysis = p.documents.map(d => {
+                                const folderLoc = (d.folderPath && d.folderPath !== "/") ? ` [Folder: "${d.folderPath}"]` : " [Folder: Root /]";
+                                const textContent = d.extractedText 
+                                    ? `\n  - Document Content ("${d.name}" in ${folderLoc}): """${d.extractedText.substring(0, 6000)}"""` 
+                                    : "";
+                                return `[File: "${d.name}"${folderLoc}, Type: ${d.fileType || 'file'}${textContent}]`;
+                            }).join("\n  ");
+                        }
+
+                        return `- Project: "${p.name}" | Client: ${p.clientName} | Status: ${p.status || 'Pending'} | Total Allotted Hours: ${p.allottedHours || 0}${timelineAnalysis} | Theme: ${p.theme || 'Default'} | Deployment Location: ${p.deploymentLocation || 'Not Specified'} | Language: ${p.language || 'N/A'} | Database: ${p.database || 'N/A'} | Extra Reqs: ${p.extraRequirements || 'None'} | Timeline: ${startStr} to ${endStr} | Team Assigned: ${assignedStr}\n  - Uploaded Folder Structure: ${folderTreeAnalysis}\n  - Attached Project Documents & Files:\n  ${docsAnalysis}`;
                     }).join("\n");
                 }
             } catch (e) { }
@@ -1110,13 +1170,18 @@ ${empSummaryText}
 ${projSummaryText}
 
 STRICT INSTRUCTIONS FOR ANSWERS:
-1. Use the LIVE WORKSPACE SNAPSHOT above to answer ANY questions about project details, client names, project statuses, tech stacks, assigned team members, employee details, department counts, timelines, or remaining hours.
+1. Use the LIVE WORKSPACE SNAPSHOT above to answer ANY questions about project details, client names, project statuses, tech stacks, assigned team members, employee details, department counts, timelines, remaining hours, or uploaded project documents/files.
 2. When asked about "remaining hours", "time left", "days left", or schedule estimations:
    - Use the CURRENT SYSTEM DATE (${currentDateStr}) and compare it against the project's start date and end date.
-   - Explain the remaining days until project deadline and compute the estimated remaining hours out of total allotted hours based on time passed vs deadline (e.g. remaining days / total duration * total hours). NEVER say "I cannot calculate remaining hours". Always calculate it clearly!
-3. Always keep your responses VERY COMPACT, direct, and concise (maximum 2-4 short bullet points or 1-2 brief sentences).
-4. Avoid writing long paragraphs, disclaimers, lengthy step-by-step guides, or tables unless explicitly requested.
-5. Keep the tone helpful, professional, and straight to the point.`
+   - Explain the remaining days until project deadline and compute the estimated remaining hours out of total allotted hours based on time passed vs deadline. ALWAYS calculate it clearly!
+3. When asked about uploaded project documents, files, folders, data tables, or images:
+   - Check the "Uploaded Folder Structure" and "Folder Location" for each document in the snapshot.
+   - Answer questions about which folders exist, how many files are inside each folder (e.g., 2 PDFs in a folder), and summarize/read the contents of all files inside those folders.
+   - Read and report exact data from tables (e.g. Team Members, Quarterly Financials, Scores, Revenue, Profit), section details, and image/figure counts.
+4. When reporting table rows or multiple data items, format each item on a NEW bullet point line (one line per row/item). NEVER join multiple table rows into one single continuous horizontal line!
+5. Always keep your responses VERY COMPACT, direct, and concise (maximum 2-4 short bullet points or 1-2 brief sentences).
+6. Avoid writing long paragraphs, disclaimers, lengthy step-by-step guides, or tables unless explicitly requested.
+7. Keep the tone helpful, professional, and straight to the point.`
         };
 
         const groqMessages = [systemPrompt, ...messages];

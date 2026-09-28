@@ -139,7 +139,7 @@ export default function AIChatBot({ token }) {
           </CardHeader>
 
           {/* Chat Messages */}
-          <CardContent className="flex-1 p-4 overflow-y-auto space-y-3.5 text-xs">
+          <CardContent className="flex-1 p-4 overflow-y-auto overflow-x-hidden space-y-3.5 text-xs">
             {messages.map((msg, index) => (
               <div
                 key={index}
@@ -159,7 +159,7 @@ export default function AIChatBot({ token }) {
                   )}
                 </div>
                 <div
-                  className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl leading-relaxed whitespace-pre-wrap ${
+                  className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl leading-relaxed whitespace-pre-wrap break-words [word-break:break-word] min-w-0 ${
                     msg.role === "user"
                       ? "bg-primary text-primary-foreground rounded-tr-none"
                       : "bg-muted text-foreground border border-border/50 rounded-tl-none"

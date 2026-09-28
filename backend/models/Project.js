@@ -72,6 +72,7 @@ const projectSchema = new mongoose.Schema(
         public_id: { type: String, default: "" },
         uploadedBy: { type: String, default: "" },
         uploadedAt: { type: Date, default: Date.now },
+        extractedText: { type: String, default: "" },
       },
     ],
     activities: [
