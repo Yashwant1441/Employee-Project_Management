@@ -1026,7 +1026,7 @@ app.post("/api/register", async (req, res) => {
     }
 });
 
-// AI Chatbot Conversational Assistant Route (Groq API - Q&A Only)
+// AI Chatbot Conversational Assistant Route (Groq API - Full Workspace Context-Aware & Compact)
 app.post("/api/chat", requireAuth, async (req, res) => {
     try {
         const { messages } = req.body;
@@ -1034,11 +1034,89 @@ app.post("/api/chat", requireAuth, async (req, res) => {
             return res.status(400).json({ message: "Messages array is required." });
         }
 
+        const userId = req.userId || req.user?.userId;
+        let empSummaryText = "No employee records found.";
+        let projSummaryText = "No project records found.";
+        let totalEmployees = 0;
+        let totalProjects = 0;
+
+        const now = new Date();
+        const currentDateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+
+        if (userId) {
+            try {
+                const userEmployees = await Employee.find({ userId })
+                    .select("employeeId name department")
+                    .lean();
+
+                const userProjects = await Project.find({ userId })
+                    .select("name clientName status allottedHours assignedEmployees database language theme deploymentLocation extraRequirements startDate endDate")
+                    .lean();
+
+                totalEmployees = userEmployees.length;
+                totalProjects = userProjects.length;
+
+                if (userEmployees.length > 0) {
+                    empSummaryText = userEmployees.map(e => 
+                        `- Name: ${e.name} | ID: ${e.employeeId} | Dept: ${e.department}`
+                    ).join("\n");
+                }
+
+                if (userProjects.length > 0) {
+                    projSummaryText = userProjects.map(p => {
+                        const assignedStr = Array.isArray(p.assignedEmployees) && p.assignedEmployees.length > 0
+                            ? p.assignedEmployees.join(", ")
+                            : "None";
+                        const startDateObj = p.startDate ? new Date(p.startDate) : null;
+                        const endDateObj = p.endDate ? new Date(p.endDate) : null;
+                        const startStr = startDateObj ? startDateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : "N/A";
+                        const endStr = endDateObj ? endDateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : "N/A";
+
+                        let timelineAnalysis = "";
+                        if (startDateObj && endDateObj) {
+                            const totalDurationDays = Math.max(1, Math.ceil((endDateObj - startDateObj) / (1000 * 60 * 60 * 24)));
+                            const daysPassed = Math.max(0, Math.floor((now - startDateObj) / (1000 * 60 * 60 * 24)));
+                            const daysRemaining = Math.max(0, Math.ceil((endDateObj - now) / (1000 * 60 * 60 * 24)));
+                            const totalHours = p.allottedHours || 0;
+
+                            const timeElapsedFraction = Math.min(1, Math.max(0, daysPassed / totalDurationDays));
+                            const estRemainingHours = Math.round(totalHours * (1 - timeElapsedFraction));
+
+                            timelineAnalysis = ` | Total Duration: ${totalDurationDays} days | Days Remaining: ${daysRemaining} days | Est. Remaining Hours (Schedule-based): ~${estRemainingHours} hours (out of ${totalHours} hrs)`;
+                        }
+
+                        return `- Project: "${p.name}" | Client: ${p.clientName} | Status: ${p.status || 'Pending'} | Total Allotted Hours: ${p.allottedHours || 0}${timelineAnalysis} | Theme: ${p.theme || 'Default'} | Deployment Location: ${p.deploymentLocation || 'Not Specified'} | Language: ${p.language || 'N/A'} | Database: ${p.database || 'N/A'} | Extra Reqs: ${p.extraRequirements || 'None'} | Timeline: ${startStr} to ${endStr} | Team Assigned: ${assignedStr}`;
+                    }).join("\n");
+                }
+            } catch (e) { }
+        }
+
         const systemPrompt = {
             role: "system",
             content: `You are an intelligent, polite, and helpful AI Assistant for the Employee & Project Management Portal (Apex System).
-Your goal is to answer user questions about employee management, project tracking, system navigation, and workplace productivity.
-Provide clear, accurate, and concise responses. Use markdown formatting (bolding, lists, code snippets) where appropriate to make answers readable.`
+
+CURRENT SYSTEM DATE: ${currentDateStr} (${now.toISOString().split('T')[0]})
+
+LIVE WORKSPACE SNAPSHOT (Real-Time Database Context for this user):
+
+📊 TOTAL COUNTS:
+- Total Employees: ${totalEmployees}
+- Total Projects: ${totalProjects}
+
+👥 EMPLOYEE DIRECTORY:
+${empSummaryText}
+
+📁 PROJECT PORTFOLIO:
+${projSummaryText}
+
+STRICT INSTRUCTIONS FOR ANSWERS:
+1. Use the LIVE WORKSPACE SNAPSHOT above to answer ANY questions about project details, client names, project statuses, tech stacks, assigned team members, employee details, department counts, timelines, or remaining hours.
+2. When asked about "remaining hours", "time left", "days left", or schedule estimations:
+   - Use the CURRENT SYSTEM DATE (${currentDateStr}) and compare it against the project's start date and end date.
+   - Explain the remaining days until project deadline and compute the estimated remaining hours out of total allotted hours based on time passed vs deadline (e.g. remaining days / total duration * total hours). NEVER say "I cannot calculate remaining hours". Always calculate it clearly!
+3. Always keep your responses VERY COMPACT, direct, and concise (maximum 2-4 short bullet points or 1-2 brief sentences).
+4. Avoid writing long paragraphs, disclaimers, lengthy step-by-step guides, or tables unless explicitly requested.
+5. Keep the tone helpful, professional, and straight to the point.`
         };
 
         const groqMessages = [systemPrompt, ...messages];
@@ -1048,7 +1126,7 @@ Provide clear, accurate, and concise responses. Use markdown formatting (bolding
             messages: groqMessages,
             model: "openai/gpt-oss-120b",
             temperature: 0.7,
-            max_completion_tokens: 1024,
+            max_completion_tokens: 512,
         });
 
         const reply = completion.choices[0]?.message?.content || "I couldn't process your request right now.";
