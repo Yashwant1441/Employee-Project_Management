@@ -593,6 +593,9 @@ export function ProjectsView({
   const isFirstMountRef = useRef(true);
 
   useEffect(() => {
+    if (projects && projects.length > 0 && isFirstMountRef.current) {
+      return;
+    }
     fetchProjects(currentPage, itemsPerPage, searchQuery);
   }, [currentPage, itemsPerPage]);
 

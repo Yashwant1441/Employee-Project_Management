@@ -392,7 +392,7 @@ app.all("/api/projects/query", requireAuth, async (req, res, next) => {
         }
 
         const projects = await Project.find(filter)
-            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation")
+            .select("name clientName startDate endDate allottedHours employeeCount assignedEmployees status icon theme database language extraRequirements deploymentLocation timelyUpdates documents")
             .sort({ endDate: 1 });
 
         res.setHeader("Accept-Query", "application/json");
@@ -430,7 +430,7 @@ app.get("/api/projects", requireAuth, async (req, res) => {
         const totalProjects = await Project.countDocuments(projectFilter);
 
         let query = Project.find(projectFilter)
-            .select("name clientName status icon version")
+            .select("name clientName status icon version allottedHours assignedEmployees employeeCount startDate endDate theme database language extraRequirements deploymentLocation timelyUpdates documents")
             .sort({ createdAt: -1 });
 
         let page = 1;
@@ -853,13 +853,23 @@ app.post("/api/projects/:id/timely-updates", requireAuth, async (req, res) => {
             project.timelyUpdates = [];
         }
 
+        const now = new Date();
+        let updateDate = now;
+        if (date) {
+            const parsed = new Date(date);
+            if (!isNaN(parsed.getTime())) {
+                parsed.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+                updateDate = parsed;
+            }
+        }
+
         const newUpdate = {
             title: title.trim(),
             description: (description || "").trim(),
             category: category || "observation",
-            date: date ? new Date(date) : new Date(),
+            date: updateDate,
             loggedBy: userEmail,
-            createdAt: new Date()
+            createdAt: now
         };
 
         project.timelyUpdates.unshift(newUpdate);

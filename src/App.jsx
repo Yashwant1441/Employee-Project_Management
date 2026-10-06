@@ -78,9 +78,11 @@ import {
   Loader2,
   Camera,
   Check,
+  Clock,
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { ProjectsView } from "@/components/ProjectsView";
+import { RecentUpdatesView } from "@/components/RecentUpdatesView";
 import { NotificationModal } from "@/components/ui/NotificationModal";
 
 const PRESET_AVATARS = [
@@ -115,7 +117,9 @@ function App() {
     ? "projects"
     : location.pathname === "/employees"
       ? "employees"
-      : "home";
+      : location.pathname === "/recent-updates"
+        ? "recent-updates"
+        : "home";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
@@ -253,6 +257,12 @@ function App() {
     try {
       const url = `${API_BASE_URL}/api/employees?page=${page}&limit=${limit}&search=${encodeURIComponent(search.trim())}`;
       const response = await fetch(url, { headers: authHeaders });
+      
+      if (response.status === 401) {
+        handleLogout();
+        return;
+      }
+
       const data = await response.json();
       
       if (response.ok) {
@@ -302,6 +312,12 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/api/projects`, {
         headers: authHeaders,
       });
+
+      if (response.status === 401) {
+        handleLogout();
+        return;
+      }
+
       const data = await response.json();
       let projList = [];
       if (data && Array.isArray(data.projects)) {
@@ -333,8 +349,10 @@ function App() {
     if (!isLoggedIn) return;
     if (activeTab === "employees") {
       fetchEmployees(currentPage, itemsPerPage, searchQuery);
+    } else if (activeTab === "recent-updates" && !hasFetchedProjects && projects.length === 0) {
+      fetchProjects();
     }
-  }, [isLoggedIn, activeTab, currentPage, itemsPerPage]);
+  }, [isLoggedIn, activeTab, currentPage, itemsPerPage, hasFetchedProjects, projects.length]);
 
   const isFirstEmpMountRef = useRef(true);
 
@@ -812,6 +830,19 @@ function App() {
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={activeTab === "recent-updates"}
+                      onClick={() => navigate("/recent-updates")}
+                    >
+                      <Clock className="h-4 w-4 text-emerald-500" />
+                      <span className="flex">Recent Updates</span>
+                      <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                        {totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0)}
+                      </Badge>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroup>
             </SidebarContent>
@@ -847,7 +878,9 @@ function App() {
                       ? "Home Dashboard"
                       : activeTab === "projects"
                         ? "Project Portfolio"
-                        : "Employee Management"}
+                        : activeTab === "recent-updates"
+                          ? "Recent Timely Updates"
+                          : "Employee Management"}
                   </span>
                 </div>
               </div>
@@ -1038,6 +1071,18 @@ function App() {
                       setStatuses={setStatuses}
                       employees={employees}
                       currentUser={currentUser}
+                    />
+                  }
+                />
+
+                {/* RECENT TIMELY UPDATES VIEW */}
+                <Route
+                  path="/recent-updates"
+                  element={
+                    <RecentUpdatesView
+                      projects={projects}
+                      employees={employees}
+                      navigate={navigate}
                     />
                   }
                 />
