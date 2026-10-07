@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import API_BASE_URL from "../api";
 import {
   Card,
   CardContent,
@@ -17,6 +18,7 @@ import {
   CheckCircle2,
   Calendar,
   User,
+  Users,
   ChevronRight,
   ChevronDown,
   Filter,
@@ -25,13 +27,49 @@ import {
   Layers,
   ArrowUpRight,
   Activity,
-  Tag
+  Tag,
+  Loader2
 } from "lucide-react";
 
 export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedEmployee, setSelectedEmployee] = useState("all");
+  const [selectedProject, setSelectedProject] = useState("all");
   const [expandedProjects, setExpandedProjects] = useState({});
+  const [feedProjects, setFeedProjects] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchRecentUpdatesFeed = async () => {
+      try {
+        setIsLoading(true);
+        const token = localStorage.getItem("app_token");
+        const res = await fetch(`${API_BASE_URL}/api/projects/recent-updates-feed`, {
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        const data = await res.json();
+        if (res.ok && data.projects && isMounted) {
+          setFeedProjects(data.projects);
+        }
+      } catch (err) {
+        console.error("Failed to fetch recent updates feed:", err);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    fetchRecentUpdatesFeed();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const activeProjectsList = feedProjects.length > 0 ? feedProjects : projects;
 
   const toggleExpand = (projectId) => {
     setExpandedProjects((prev) => ({
@@ -49,7 +87,7 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
 
   // Process projects to find latest timely update timestamp and sort accordingly
   const processedProjects = useMemo(() => {
-    return (projects || []).map((project) => {
+    return (activeProjectsList || []).map((project) => {
       const updates = Array.isArray(project.timelyUpdates) ? project.timelyUpdates : [];
       
       // Find the latest update date
@@ -74,7 +112,7 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
         hasUpdates: updates.length > 0,
       };
     });
-  }, [projects]);
+  }, [activeProjectsList]);
 
   // Sort projects: Projects with updates first (ordered by newest update timestamp), then projects without updates
   const sortedProjects = useMemo(() => {
@@ -89,7 +127,26 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
     });
   }, [processedProjects]);
 
-  // Filter projects by search query and selected category
+  // Extract unique employee names for filtering strictly from registered employees
+  const employeeOptions = useMemo(() => {
+    const names = (employees || [])
+      .map((e) => (e && e.name ? e.name.trim() : ""))
+      .filter(Boolean);
+    return Array.from(new Set(names)).sort();
+  }, [employees]);
+
+  // Extract unique projects for filtering
+  const projectOptions = useMemo(() => {
+    const list = [];
+    (activeProjectsList || []).forEach((p) => {
+      if (p && p.name) {
+        list.push({ id: p.id || p._id || p.name, name: p.name });
+      }
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [activeProjectsList]);
+
+  // Filter projects by search query, selected category, employee, and project
   const filteredProjects = useMemo(() => {
     return sortedProjects.filter((project) => {
       const query = searchQuery.toLowerCase().trim();
@@ -118,9 +175,53 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
         }
       }
 
-      return matchesSearch && matchesCat;
+      // Match employee filter
+      let matchesEmp = true;
+      if (selectedEmployee !== "all") {
+        const selEmpObj = (employees || []).find(
+          (e) => (e.name || "").trim().toLowerCase() === selectedEmployee.toLowerCase()
+        );
+        const targetNameLower = selectedEmployee.toLowerCase();
+        const targetIdLower = selEmpObj?.employeeId?.toLowerCase() || "";
+
+        const assignedList = Array.isArray(project.assignedEmployees)
+          ? project.assignedEmployees
+          : typeof project.assignedEmployees === "string"
+          ? project.assignedEmployees.split(",").map((s) => s.trim())
+          : [];
+
+        const isAssigned = assignedList.some((n) => {
+          const nLower = (n || "").toLowerCase();
+          return (
+            nLower === targetNameLower ||
+            (targetIdLower && nLower === targetIdLower) ||
+            nLower.includes(targetNameLower) ||
+            targetNameLower.includes(nLower)
+          );
+        });
+
+        const loggedAnUpdate = project.updatesList.some((u) => {
+          const loggedLower = (u.loggedBy || "").toLowerCase();
+          return (
+            loggedLower === targetNameLower ||
+            (targetIdLower && loggedLower === targetIdLower) ||
+            loggedLower.includes(targetNameLower)
+          );
+        });
+
+        matchesEmp = isAssigned || loggedAnUpdate;
+      }
+
+      // Match project filter
+      let matchesProj = true;
+      if (selectedProject !== "all") {
+        const pId = project.id || project._id || project.name;
+        matchesProj = pId === selectedProject || project.name === selectedProject;
+      }
+
+      return matchesSearch && matchesCat && matchesEmp && matchesProj;
     });
-  }, [sortedProjects, searchQuery, selectedCategory]);
+  }, [sortedProjects, searchQuery, selectedCategory, selectedEmployee, selectedProject]);
 
   // Overall Statistics
   const totalUpdatesCount = useMemo(() => {
@@ -285,9 +386,10 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
       </div>
 
       {/* Filter and Search Bar */}
-      <Card className="p-4">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="relative w-full md:w-80">
+      <Card className="p-4 space-y-3">
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-3">
+          {/* Search Input */}
+          <div className="relative w-full lg:w-72 shrink-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search projects or updates..."
@@ -297,56 +399,123 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
             />
           </div>
 
-          <div className="flex items-center gap-1.5 flex-wrap w-full md:w-auto">
-            <span className="text-xs font-medium text-muted-foreground mr-1 flex items-center gap-1">
-              <Filter className="w-3.5 h-3.5" /> Category:
-            </span>
-            <Button
-              variant={selectedCategory === "all" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSelectedCategory("all")}
-              className="h-7 text-xs px-2.5 rounded-full"
-            >
-              All Projects ({sortedProjects.length})
-            </Button>
-            <Button
-              variant={selectedCategory === "observation" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSelectedCategory("observation")}
-              className="h-7 text-xs px-2.5 rounded-full"
-            >
-              Observations
-            </Button>
-            <Button
-              variant={selectedCategory === "case" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSelectedCategory("case")}
-              className="h-7 text-xs px-2.5 rounded-full"
-            >
-              Cases / Issues
-            </Button>
-            <Button
-              variant={selectedCategory === "system" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSelectedCategory("system")}
-              className="h-7 text-xs px-2.5 rounded-full"
-            >
-              System
-            </Button>
-            <Button
-              variant={selectedCategory === "no-updates" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSelectedCategory("no-updates")}
-              className="h-7 text-xs px-2.5 rounded-full text-muted-foreground"
-            >
-              No Updates Yet
-            </Button>
+          {/* Employee & Project Dropdown Filters */}
+          <div className="flex items-center gap-3 flex-wrap w-full lg:w-auto">
+            {/* Employee Dropdown */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground flex items-center gap-1 shrink-0">
+                <Users className="w-3.5 h-3.5" /> Employee:
+              </span>
+              <select
+                value={selectedEmployee}
+                onChange={(e) => setSelectedEmployee(e.target.value)}
+                className="h-9 px-3 text-xs rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+              >
+                <option value="all">All Employees ({employeeOptions.length})</option>
+                {employeeOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Project Dropdown */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground flex items-center gap-1 shrink-0">
+                <Briefcase className="w-3.5 h-3.5" /> Project:
+              </span>
+              <select
+                value={selectedProject}
+                onChange={(e) => setSelectedProject(e.target.value)}
+                className="h-9 px-3 text-xs rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer max-w-[200px] truncate"
+              >
+                <option value="all">All Projects ({projectOptions.length})</option>
+                {projectOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
+        </div>
+
+        {/* Category Pills Bar */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-border/40">
+          <span className="text-xs font-medium text-muted-foreground mr-1 flex items-center gap-1">
+            <Filter className="w-3.5 h-3.5" /> Category:
+          </span>
+          <Button
+            variant={selectedCategory === "all" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSelectedCategory("all")}
+            className="h-7 text-xs px-2.5 rounded-full"
+          >
+            All Logs
+          </Button>
+          <Button
+            variant={selectedCategory === "observation" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSelectedCategory("observation")}
+            className="h-7 text-xs px-2.5 rounded-full"
+          >
+            Observations
+          </Button>
+          <Button
+            variant={selectedCategory === "case" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSelectedCategory("case")}
+            className="h-7 text-xs px-2.5 rounded-full"
+          >
+            Cases / Issues
+          </Button>
+          <Button
+            variant={selectedCategory === "system" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSelectedCategory("system")}
+            className="h-7 text-xs px-2.5 rounded-full"
+          >
+            System
+          </Button>
+          <Button
+            variant={selectedCategory === "no-updates" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSelectedCategory("no-updates")}
+            className="h-7 text-xs px-2.5 rounded-full text-muted-foreground"
+          >
+            No Updates Yet
+          </Button>
+
+          {(searchQuery || selectedCategory !== "all" || selectedEmployee !== "all" || selectedProject !== "all") && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchQuery("");
+                setSelectedCategory("all");
+                setSelectedEmployee("all");
+                setSelectedProject("all");
+              }}
+              className="h-7 text-xs px-2 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 ml-auto"
+            >
+              Clear All Filters
+            </Button>
+          )}
         </div>
       </Card>
 
       {/* Projects List Feed */}
-      {filteredProjects.length === 0 ? (
+      {isLoading ? (
+        <Card className="p-12 text-center">
+          <div className="flex flex-col items-center justify-center space-y-3">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+            <p className="text-xs text-muted-foreground font-medium">
+              Fetching latest project timely updates...
+            </p>
+          </div>
+        </Card>
+      ) : filteredProjects.length === 0 ? (
         <Card className="p-12 text-center">
           <div className="flex flex-col items-center justify-center space-y-3">
             <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center text-muted-foreground">
@@ -362,6 +531,8 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
               onClick={() => {
                 setSearchQuery("");
                 setSelectedCategory("all");
+                setSelectedEmployee("all");
+                setSelectedProject("all");
               }}
             >
               Reset Filters
@@ -369,7 +540,7 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
           </div>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-6 items-start">
           {filteredProjects.map((project) => {
             const isExpanded = !!expandedProjects[project.id || project._id];
             const latest = project.latestUpdateObj;
@@ -377,156 +548,159 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
             return (
               <Card
                 key={project.id || project._id}
-                className={`transition-all border-border/80 hover:border-border overflow-hidden ${
+                className={`transition-all border-border/80 hover:border-border flex flex-col justify-between overflow-hidden h-full ${
                   project.hasUpdates ? "bg-card shadow-sm" : "bg-card/50 opacity-90"
                 }`}
               >
-                {/* Project Header Row */}
-                <div className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/50">
-                  <div className="flex items-start md:items-center gap-3 min-w-0">
-                    <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold shrink-0 mt-0.5 md:mt-0">
-                      <Briefcase className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-base font-bold text-foreground truncate">
-                          {project.name}
-                        </h3>
-                        {getStatusBadge(project.status)}
-                        {project.hasUpdates ? (
-                          <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[11px] gap-1 font-mono">
-                            <Clock className="w-3 h-3" /> Latest: {formatDate(latest)}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[11px] text-muted-foreground font-mono">
-                            No Updates Logged
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3 flex-wrap">
-                        <span>Client: <strong className="text-foreground/90">{project.clientName || "N/A"}</strong></span>
-                        {project.allottedHours > 0 && (
-                          <span>• Hours Allotted: <strong className="text-foreground/90">{project.allottedHours} hrs</strong></span>
-                        )}
-                        <span>• Total Updates: <strong className="text-foreground/90">{project.updatesList.length}</strong></span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
-                    {project.hasUpdates && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => toggleExpand(project.id || project._id)}
-                        className="text-xs gap-1.5 h-8"
-                      >
-                        {isExpanded ? (
-                          <>
-                            Hide Log History <ChevronDown className="w-3.5 h-3.5 rotate-180 transition-transform" />
-                          </>
-                        ) : (
-                          <>
-                            View History ({project.updatesList.length}) <ChevronDown className="w-3.5 h-3.5 transition-transform" />
-                          </>
-                        )}
-                      </Button>
-                    )}
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate && navigate("/projects")}
-                      className="text-xs gap-1 h-8"
-                    >
-                      Open Project <ArrowUpRight className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Latest Update Highlight Banner */}
-                {project.hasUpdates && latest && (
-                  <div className="p-4 bg-muted/40 border-l-4 border-l-emerald-500 space-y-2">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        {getCategoryBadge(latest.category)}
-                        <span className="text-xs font-bold text-foreground">
-                          {latest.title}
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
-                        <Calendar className="w-3 h-3" /> {formatDate(latest)}
-                      </span>
-                    </div>
-
-                    {latest.description && (
-                      <p className="text-xs text-foreground/80 leading-relaxed bg-card/60 p-3 rounded-lg border border-border/40 whitespace-pre-wrap">
-                        {latest.description}
-                      </p>
-                    )}
-
-                    <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1">
-                      <span className="flex items-center gap-1">
-                        <User className="w-3 h-3 text-primary" /> Logged by: <strong className="text-foreground/90">{latest.loggedBy || "User"}</strong>
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Historical Updates List (Expanded) */}
-                {isExpanded && project.hasUpdates && (
-                  <div className="p-4 bg-card border-t border-border/60 space-y-3 animate-in fade-in duration-200">
-                    <div className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
-                      <Clock className="w-3.5 h-3.5 text-primary" /> All Logged Updates ({project.updatesList.length})
-                    </div>
-
-                    <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                      {project.updatesList.map((item, idx) => (
-                        <div
-                          key={item._id || item.id || idx}
-                          className="p-3 rounded-lg bg-muted/30 border border-border/50 text-xs space-y-1.5 hover:bg-muted/50 transition-colors"
-                        >
-                          <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-2">
-                              {getCategoryBadge(item.category)}
-                              <span className="font-semibold text-foreground">{item.title}</span>
-                            </div>
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              {formatDate(item)}
-                            </span>
-                          </div>
-
-                          {item.description && (
-                            <p className="text-muted-foreground text-[11.5px] leading-relaxed">
-                              {item.description}
-                            </p>
-                          )}
-
-                          <div className="text-[10px] text-muted-foreground/80 flex items-center gap-1 pt-0.5">
-                            <User className="w-2.5 h-2.5" /> Logged by: {item.loggedBy || "User"}
+                <div>
+                  {/* Project Header */}
+                  <div className="p-4 border-b border-border/50 space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold shrink-0">
+                          <Briefcase className="h-4.5 w-4.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-bold text-foreground truncate" title={project.name}>
+                            {project.name}
+                          </h3>
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            Client: <strong className="text-foreground/90">{project.clientName || "N/A"}</strong>
                           </div>
                         </div>
-                      ))}
+                      </div>
+                      <div className="shrink-0">
+                        {getStatusBadge(project.status)}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/30 text-[11px] text-muted-foreground">
+                      <span>Total Updates: <strong className="text-foreground/90">{project.updatesList.length}</strong></span>
+                      {project.hasUpdates ? (
+                        <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px] gap-1 font-mono py-0 h-4">
+                          <Clock className="w-2.5 h-2.5" /> Latest: {formatDate(latest)}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground font-mono py-0 h-4">
+                          No Updates
+                        </Badge>
+                      )}
                     </div>
                   </div>
-                )}
 
-                {/* No Updates Prompt */}
-                {!project.hasUpdates && (
-                  <div className="p-4 text-xs text-muted-foreground flex items-center justify-between bg-muted/20">
-                    <span className="flex items-center gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5 text-amber-500" /> No timely updates or observations logged for this project yet.
-                    </span>
+                  {/* Latest Update Content */}
+                  {project.hasUpdates && latest && (
+                    <div className="p-4 bg-muted/40 border-l-4 border-l-emerald-500 space-y-2">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {getCategoryBadge(latest.category)}
+                          <span className="text-xs font-bold text-foreground">
+                            {latest.title}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground flex items-center gap-1 font-mono shrink-0">
+                          <Calendar className="w-2.5 h-2.5" /> {formatDate(latest)}
+                        </span>
+                      </div>
+
+                      {latest.description && (
+                        <p className="text-xs text-foreground/80 leading-relaxed bg-card/70 p-2.5 rounded-lg border border-border/40 whitespace-pre-wrap max-h-36 overflow-y-auto">
+                          {latest.description}
+                        </p>
+                      )}
+
+                      <div className="text-[10.5px] text-muted-foreground pt-0.5 flex items-center justify-between">
+                        <span className="flex items-center gap-1 truncate">
+                          <User className="w-2.5 h-2.5 text-primary shrink-0" /> Logged by: <strong className="text-foreground/90 truncate">{latest.loggedBy || "User"}</strong>
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* No Updates Placeholder */}
+                  {!project.hasUpdates && (
+                    <div className="p-4 text-xs text-muted-foreground space-y-2 bg-muted/20">
+                      <div className="flex items-center gap-1.5 text-amber-500">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span className="font-semibold text-foreground/80">No Timely Updates Logged</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Observations or cases logged for this project will appear here automatically.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Historical Updates List (Expanded inside card) */}
+                  {isExpanded && project.hasUpdates && (
+                    <div className="p-3 bg-card border-t border-border/60 space-y-2.5 animate-in fade-in duration-200">
+                      <div className="text-[11px] font-bold text-muted-foreground flex items-center gap-1 uppercase tracking-wider">
+                        <Clock className="w-3 h-3 text-primary" /> Log History ({project.updatesList.length})
+                      </div>
+
+                      <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                        {project.updatesList.map((item, idx) => (
+                          <div
+                            key={item._id || item.id || idx}
+                            className="p-2.5 rounded-lg bg-muted/40 border border-border/50 text-xs space-y-1 hover:bg-muted/60 transition-colors"
+                          >
+                            <div className="flex items-center justify-between gap-1 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                {getCategoryBadge(item.category)}
+                                <span className="font-semibold text-foreground">{item.title}</span>
+                              </div>
+                              <span className="text-[9.5px] text-muted-foreground font-mono">
+                                {formatDate(item)}
+                              </span>
+                            </div>
+
+                            {item.description && (
+                              <p className="text-muted-foreground text-[11px] leading-relaxed">
+                                {item.description}
+                              </p>
+                            )}
+
+                            <div className="text-[9.5px] text-muted-foreground/80 flex items-center gap-1 pt-0.5">
+                              <User className="w-2.5 h-2.5" /> Logged by: {item.loggedBy || "User"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Card Actions Footer */}
+                <div className="p-3 border-t border-border/50 bg-muted/20 flex items-center justify-between gap-2 mt-auto">
+                  {project.hasUpdates ? (
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => navigate && navigate("/projects")}
-                      className="text-xs h-7 text-primary"
+                      onClick={() => toggleExpand(project.id || project._id)}
+                      className="text-xs gap-1 h-7 px-2 text-muted-foreground hover:text-foreground"
                     >
-                      Log Update
+                      {isExpanded ? (
+                        <>
+                          Hide History <ChevronDown className="w-3 h-3 rotate-180 transition-transform" />
+                        </>
+                      ) : (
+                        <>
+                          History ({project.updatesList.length}) <ChevronDown className="w-3 h-3 transition-transform" />
+                        </>
+                      )}
                     </Button>
-                  </div>
-                )}
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground italic">No logs yet</span>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate && navigate("/projects")}
+                    className="text-xs gap-1 h-7 px-2.5"
+                  >
+                    Open Project <ArrowUpRight className="w-3 h-3" />
+                  </Button>
+                </div>
               </Card>
             );
           })}

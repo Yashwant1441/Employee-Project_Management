@@ -768,6 +768,14 @@ function App() {
     }
   };
 
+  const displayedProjectsCount = projects.length > 0
+    ? projects.length
+    : (totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0));
+
+  const displayedEmployeesCount = employees.length > 0
+    ? employees.length
+    : (totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0));
+
   if (isLoggedIn) {
     return (
       <SidebarProvider>
@@ -813,7 +821,7 @@ function App() {
                       <Users className="h-4 w-4" />
                       <span className="flex">Employees</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono">
-                        {totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0)}
+                        {displayedEmployeesCount}
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -826,7 +834,7 @@ function App() {
                       <Briefcase className="h-4 w-4" />
                       <span className="flex">Projects</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono">
-                        {totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0)}
+                        {displayedProjectsCount}
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -839,7 +847,7 @@ function App() {
                       <Clock className="h-4 w-4 text-emerald-500" />
                       <span className="flex">Recent Updates</span>
                       <Badge variant="secondary" className="text-[10px] py-0 h-4 font-mono bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
-                        {totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0)}
+                        {displayedProjectsCount}
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

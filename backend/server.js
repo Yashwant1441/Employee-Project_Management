@@ -430,7 +430,7 @@ app.get("/api/projects", requireAuth, async (req, res) => {
         const totalProjects = await Project.countDocuments(projectFilter);
 
         let query = Project.find(projectFilter)
-            .select("name clientName status icon version allottedHours assignedEmployees employeeCount startDate endDate theme database language extraRequirements deploymentLocation timelyUpdates documents")
+            .select("name clientName status icon version allottedHours assignedEmployees employeeCount startDate endDate theme database language extraRequirements deploymentLocation")
             .sort({ createdAt: -1 });
 
         let page = 1;
@@ -465,6 +465,20 @@ app.get("/api/projects", requireAuth, async (req, res) => {
             message: "Failed to fetch projects",
             error: error.message
         });
+    }
+});
+
+// GET Dedicated Recent Timely Updates Feed Route (For Recent Updates Page)
+app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const projects = await Project.find({ userId })
+            .select("name clientName status icon allottedHours startDate endDate theme assignedEmployees timelyUpdates")
+            .lean();
+
+        res.status(200).json({ projects });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to fetch recent updates feed", error: error.message });
     }
 });
 
