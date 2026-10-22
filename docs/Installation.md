@@ -78,6 +78,38 @@ npm run dev
 
 ---
 
+### 5. Seeding Database (1,500+ Records)
+
+To seed 1,500 realistic records (Employees, Projects, and timely updates):
+
+```bash
+# Seed 1500 Employees + 1500 Projects
+npm run seed
+
+# Or seed only 1500 Employees
+npm run seed:employees
+
+# Or seed only 1500 Projects
+npm run seed:projects
+
+# Clean existing user data and re-seed 1500 fresh records
+npm run seed:clean
+
+# Purge/Delete all seeded Employees & Projects (Reset back to 0 without re-seeding)
+npm run seed:clear
+
+# Delete seeded data for a specific user
+node backend/seed.js --clear --email your_email@example.com
+
+# Delete seeded data AND the user account itself
+node backend/seed.js --clear --delete-user --email test@apex.com
+
+# Delete all seeded data across all users in database
+node backend/seed.js --clear --all
+```
+
+---
+
 ## 🛠️ Verification & Troubleshooting
 
 - **MongoDB Timeout Error (`buffering timed out after 10000ms`)**: Ensure MongoDB Community Server is installed and running on port 27017 (`Get-Service -Name '*mongo*'`).

@@ -81,8 +81,8 @@ import {
   Clock,
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
-import { ProjectsView } from "@/components/ProjectsView";
-import { RecentUpdatesView } from "@/components/RecentUpdatesView";
+import { ProjectsView, invalidateProjectsCache } from "@/components/ProjectsView";
+import { RecentUpdatesView, invalidateRecentUpdatesCache } from "@/components/RecentUpdatesView";
 import { NotificationModal } from "@/components/ui/NotificationModal";
 
 const PRESET_AVATARS = [
@@ -182,9 +182,23 @@ function App() {
   };
 
   const [itemsPerPage, setItemsPerPage] = useState(5);
-  const [totalEmployeesCount, setTotalEmployeesCount] = useState(0);
+  const [totalEmployeesCount, setTotalEmployeesCount] = useState(() => {
+    try {
+      const saved = localStorage.getItem("app_counts");
+      return saved ? JSON.parse(saved).totalEmployees || 0 : 0;
+    } catch (e) {
+      return 0;
+    }
+  });
   const [totalPagesCount, setTotalPagesCount] = useState(1);
-  const [totalProjectsCount, setTotalProjectsCount] = useState(0);
+  const [totalProjectsCount, setTotalProjectsCount] = useState(() => {
+    try {
+      const saved = localStorage.getItem("app_counts");
+      return saved ? JSON.parse(saved).totalProjects || 0 : 0;
+    } catch (e) {
+      return 0;
+    }
+  });
 
   const isEmployeeAssigned = (project, employee) => {
     if (!project || !employee) return false;
@@ -349,10 +363,8 @@ function App() {
     if (!isLoggedIn) return;
     if (activeTab === "employees") {
       fetchEmployees(currentPage, itemsPerPage, searchQuery);
-    } else if (activeTab === "recent-updates" && !hasFetchedProjects && projects.length === 0) {
-      fetchProjects();
     }
-  }, [isLoggedIn, activeTab, currentPage, itemsPerPage, hasFetchedProjects, projects.length]);
+  }, [isLoggedIn, activeTab, currentPage, itemsPerPage]);
 
   const isFirstEmpMountRef = useRef(true);
 
@@ -402,6 +414,12 @@ function App() {
         setHasFetchedProjects(false);
         if (data.counts) {
           setCounts(data.counts);
+          if (typeof data.counts.totalEmployees === "number") {
+            setTotalEmployeesCount(data.counts.totalEmployees);
+          }
+          if (typeof data.counts.totalProjects === "number") {
+            setTotalProjectsCount(data.counts.totalProjects);
+          }
           try {
             localStorage.setItem("app_counts", JSON.stringify(data.counts));
           } catch (err) { }
@@ -448,6 +466,8 @@ function App() {
     setLoginError("");
     setEmployees([]);
     setProjects([]);
+    invalidateProjectsCache();
+    invalidateRecentUpdatesCache();
     navigate("/");
   };
 
@@ -531,8 +551,9 @@ function App() {
       };
 
       setEmployees((previousEmployees) => [...previousEmployees, newEmployee]);
+      setTotalEmployeesCount((prev) => (prev || 0) + 1);
       setCounts((prev) => {
-        const updated = { ...prev, totalEmployees: prev.totalEmployees + 1 };
+        const updated = { ...prev, totalEmployees: (prev.totalEmployees || 0) + 1 };
         try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) { }
         return updated;
       });
@@ -743,6 +764,8 @@ function App() {
             (p.id || p._id) === targetProjId ? { ...p, ...payload } : p
           )
         );
+        invalidateProjectsCache();
+        invalidateRecentUpdatesCache();
         setEmployees((prevEmployees) =>
           prevEmployees.map((emp) => {
             if ((emp.id || emp._id) !== (employee.id || employee._id)) return emp;
@@ -768,13 +791,13 @@ function App() {
     }
   };
 
-  const displayedProjectsCount = projects.length > 0
-    ? projects.length
-    : (totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0));
+  const displayedProjectsCount = totalProjectsCount > 0
+    ? totalProjectsCount
+    : (counts.totalProjects > 0 ? counts.totalProjects : (projects.length || 0));
 
-  const displayedEmployeesCount = employees.length > 0
-    ? employees.length
-    : (totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0));
+  const displayedEmployeesCount = totalEmployeesCount > 0
+    ? totalEmployeesCount
+    : (counts.totalEmployees > 0 ? counts.totalEmployees : (employees.length || 0));
 
   if (isLoggedIn) {
     return (
@@ -1079,6 +1102,9 @@ function App() {
                       setStatuses={setStatuses}
                       employees={employees}
                       currentUser={currentUser}
+                      totalProjectsCount={totalProjectsCount}
+                      setTotalProjectsCount={setTotalProjectsCount}
+                      setCounts={setCounts}
                     />
                   }
                 />

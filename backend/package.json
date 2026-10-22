@@ -4,7 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node seed.js",
+    "seed:clean": "node seed.js --clean",
+    "seed:clear": "node seed.js --clear",
+    "seed:employees": "node seed.js --only-employees --count 1500",
+    "seed:projects": "node seed.js --only-projects --count 1500",
+    "seed:both": "node seed.js --count 1500",
+    "seed:mini": "node seed.js --employees 10 --projects 4"
   },
   "keywords": [],
   "author": "",

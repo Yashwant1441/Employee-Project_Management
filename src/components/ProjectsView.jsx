@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import API_BASE_URL from "../api";
 import { KanbanBoard } from "./KanbanBoard";
+import { invalidateRecentUpdatesCache, updateRecentUpdatesProjectTimelyUpdates } from "./RecentUpdatesView";
 import {
   Card,
   CardContent,
@@ -88,6 +89,7 @@ import {
   AlertCircle,
   CheckCircle2,
   MessageSquare,
+  RefreshCw,
 } from "lucide-react";
 
 const PROJECT_ICON_PRESETS = [
@@ -414,6 +416,27 @@ function MultiSelectDropdown({
   );
 }
 
+// Module-level persistent cache across route changes and in-flight promise deduplication
+let projectsPageCache = {};
+let activeProjectFetchPromises = {};
+const PROJECTS_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+export const invalidateProjectsCache = () => {
+  projectsPageCache = {};
+  activeProjectFetchPromises = {};
+};
+
+export const updateProjectsCacheTimelyUpdates = (projectId, timelyUpdates) => {
+  Object.keys(projectsPageCache).forEach((key) => {
+    if (projectsPageCache[key]?.data?.projects) {
+      projectsPageCache[key].data.projects = projectsPageCache[key].data.projects.map((p) =>
+        String(p._id || p.id) === String(projectId) ? { ...p, timelyUpdates } : p
+      );
+      projectsPageCache[key].timestamp = Date.now();
+    }
+  });
+};
+
 export function ProjectsView({
   projects,
   setProjects,
@@ -421,12 +444,32 @@ export function ProjectsView({
   setStatuses,
   employees = [],
   currentUser = null,
+  totalProjectsCount: parentTotalProjectsCount,
+  setTotalProjectsCount: parentSetTotalProjectsCount,
+  setCounts,
 }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(6);
-  const [totalProjectsCount, setTotalProjectsCount] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [totalProjectsCount, setTotalProjectsCount] = useState(() => {
+    if (typeof parentTotalProjectsCount === "number" && parentTotalProjectsCount > 0) {
+      return parentTotalProjectsCount;
+    }
+    try {
+      const saved = localStorage.getItem("app_counts");
+      return saved ? JSON.parse(saved).totalProjects || 0 : 0;
+    } catch (e) {
+      return 0;
+    }
+  });
   const [totalPagesCount, setTotalPagesCount] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    if (typeof parentTotalProjectsCount === "number" && parentTotalProjectsCount > 0) {
+      setTotalProjectsCount(parentTotalProjectsCount);
+    }
+  }, [parentTotalProjectsCount]);
 
   const ITEMS_PER_PAGE = itemsPerPage;
   const filteredProjects = projects;
@@ -508,6 +551,9 @@ export function ProjectsView({
       if (res.ok && data.timelyUpdates) {
         setTimelyUpdates(data.timelyUpdates);
         setSelectedProject((prev) => (prev ? { ...prev, timelyUpdates: data.timelyUpdates } : null));
+        // Update both module caches in-place so NO extra network calls occur on tab navigation!
+        updateRecentUpdatesProjectTimelyUpdates(pId, data.timelyUpdates);
+        updateProjectsCacheTimelyUpdates(pId, data.timelyUpdates);
         setProjects((prev) =>
           prev.map((proj) =>
             (proj.id || proj._id) === pId
@@ -531,19 +577,29 @@ export function ProjectsView({
     }
   };
 
-  const projPageCacheRef = useRef({});
-  const isFetchingProjectsRef = useRef(false);
-
   const fetchProjects = async (page = currentPage, limit = itemsPerPage, search = searchQuery, force = false) => {
-    const key = `${page}-${limit}-${search.trim()}`;
-    if (force) {
-      projPageCacheRef.current = {};
-    } else if (projPageCacheRef.current[key]) {
-      const data = projPageCacheRef.current[key];
-      if (data && Array.isArray(data.projects)) {
+    const trimmedSearch = (search || "").trim();
+    const key = `${page}-${limit}-${trimmedSearch}`;
+
+    const cachedEntry = projectsPageCache[key];
+    const isCacheValid = cachedEntry && (Date.now() - cachedEntry.timestamp < PROJECTS_CACHE_TTL_MS);
+
+    if (!force && isCacheValid && cachedEntry.data) {
+      const data = cachedEntry.data;
+      if (Array.isArray(data.projects)) {
         setProjects(data.projects);
         if (data.pagination) {
           setTotalProjectsCount(data.pagination.totalProjects);
+          if (parentSetTotalProjectsCount) {
+            parentSetTotalProjectsCount(data.pagination.totalProjects);
+          }
+          if (setCounts) {
+            setCounts((prev) => {
+              const updated = { ...prev, totalProjects: data.pagination.totalProjects };
+              try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) { }
+              return updated;
+            });
+          }
           setTotalPagesCount(data.pagination.totalPages);
         } else {
           setTotalProjectsCount(data.projects.length);
@@ -556,24 +612,48 @@ export function ProjectsView({
       return;
     }
 
-    if (isFetchingProjectsRef.current && !force) return;
-    isFetchingProjectsRef.current = true;
-
-    const token = localStorage.getItem("app_token");
-    const authHeaders = {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    };
+    if (force) {
+      delete projectsPageCache[key];
+      setIsRefreshing(true);
+    }
 
     try {
-      const url = `${API_BASE_URL}/api/projects?page=${page}&limit=${limit}&search=${encodeURIComponent(search.trim())}`;
-      const res = await fetch(url, { headers: authHeaders });
-      const data = await res.json();
-      if (res.ok && data && Array.isArray(data.projects)) {
-        projPageCacheRef.current[key] = data;
+      // Deduplicate concurrent in-flight requests (e.g. React StrictMode mount)
+      if (!activeProjectFetchPromises[key] || force) {
+        activeProjectFetchPromises[key] = (async () => {
+          const token = localStorage.getItem("app_token");
+          const authHeaders = {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          };
+          const url = `${API_BASE_URL}/api/projects?page=${page}&limit=${limit}&search=${encodeURIComponent(trimmedSearch)}`;
+          const res = await fetch(url, { headers: authHeaders });
+          const data = await res.json();
+          if (res.ok && data && Array.isArray(data.projects)) {
+            projectsPageCache[key] = { data, timestamp: Date.now() };
+            return data;
+          }
+          return null;
+        })().finally(() => {
+          delete activeProjectFetchPromises[key];
+        });
+      }
+
+      const data = await activeProjectFetchPromises[key];
+      if (data && Array.isArray(data.projects)) {
         setProjects(data.projects);
         if (data.pagination) {
           setTotalProjectsCount(data.pagination.totalProjects);
+          if (parentSetTotalProjectsCount) {
+            parentSetTotalProjectsCount(data.pagination.totalProjects);
+          }
+          if (setCounts) {
+            setCounts((prev) => {
+              const updated = { ...prev, totalProjects: data.pagination.totalProjects };
+              try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) { }
+              return updated;
+            });
+          }
           setTotalPagesCount(data.pagination.totalPages);
         } else {
           setTotalProjectsCount(data.projects.length);
@@ -586,29 +666,26 @@ export function ProjectsView({
     } catch (err) {
       console.error("Failed to fetch projects:", err);
     } finally {
-      isFetchingProjectsRef.current = false;
+      setIsRefreshing(false);
     }
   };
 
-  const isFirstMountRef = useRef(true);
+  const isSearchMountedRef = useRef(false);
 
   useEffect(() => {
-    if (projects && projects.length > 0 && isFirstMountRef.current) {
-      return;
-    }
     fetchProjects(currentPage, itemsPerPage, searchQuery);
   }, [currentPage, itemsPerPage]);
 
   useEffect(() => {
-    if (isFirstMountRef.current) {
-      isFirstMountRef.current = false;
+    if (!isSearchMountedRef.current) {
+      isSearchMountedRef.current = true;
       return;
     }
 
     const timer = setTimeout(() => {
       setCurrentPage(1);
       fetchProjects(1, itemsPerPage, searchQuery);
-    }, 1000);
+    }, 400);
 
     return () => clearTimeout(timer);
   }, [searchQuery]);
@@ -667,6 +744,7 @@ export function ProjectsView({
       if (res.ok && data.documents) {
         const updatedDocs = data.documents;
         setSelectedProject((prev) => ({ ...prev, documents: updatedDocs }));
+        invalidateProjectsCache();
         setProjects((prevProjects) =>
           prevProjects.map((p) =>
             String(p.id || p._id) === String(targetId)
@@ -717,6 +795,7 @@ export function ProjectsView({
     const currentDocs = selectedProject.documents || [];
     const updatedDocs = currentDocs.filter((d) => String(d._id || d.id) !== String(docId));
     setSelectedProject((prev) => ({ ...prev, documents: updatedDocs }));
+    invalidateProjectsCache();
     setProjects((prevProjects) =>
       prevProjects.map((p) =>
         String(p.id || p._id) === String(targetId) ? { ...p, documents: updatedDocs } : p
@@ -767,6 +846,7 @@ export function ProjectsView({
     );
 
     setSelectedProject((prev) => ({ ...prev, documents: updatedDocs }));
+    invalidateProjectsCache();
     setProjects((prevProjects) =>
       prevProjects.map((p) =>
         String(p.id || p._id) === String(targetId) ? { ...p, documents: updatedDocs } : p
@@ -913,6 +993,9 @@ export function ProjectsView({
       const updatedData = await response.json();
       const updatedStatus = updatedData.status || newStatus;
       const updatedActivities = updatedData.activities || optimisticActivities;
+
+      invalidateProjectsCache();
+      invalidateRecentUpdatesCache();
 
       setProjects((prevProjects) =>
         prevProjects.map((p) =>
@@ -1344,6 +1427,9 @@ export function ProjectsView({
           activities: updatedActivities,
         };
 
+        invalidateProjectsCache();
+        invalidateRecentUpdatesCache();
+
         setProjects((prev) =>
           prev.map((p) => ((p.id || p._id) === targetId ? updatedProject : p))
         );
@@ -1384,6 +1470,19 @@ export function ProjectsView({
           ]
         };
         setProjects((prev) => [newProjectObj, ...prev]);
+        invalidateRecentUpdatesCache();
+        invalidateProjectsCache();
+        setTotalProjectsCount((prev) => (prev || 0) + 1);
+        if (parentSetTotalProjectsCount) {
+          parentSetTotalProjectsCount((prev) => (prev || 0) + 1);
+        }
+        if (setCounts) {
+          setCounts((prev) => {
+            const updated = { ...prev, totalProjects: (prev.totalProjects || 0) + 1 };
+            try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) { }
+            return updated;
+          });
+        }
         fetchProjects(currentPage, itemsPerPage, searchQuery, true);
         setNotificationModal({
           isOpen: true,
@@ -1420,6 +1519,19 @@ export function ProjectsView({
       if (res.ok) {
         const delId = deletingProject.id || deletingProject._id;
         setProjects((prev) => prev.filter((p) => (p.id || p._id) !== delId));
+        invalidateRecentUpdatesCache();
+        invalidateProjectsCache();
+        setTotalProjectsCount((prev) => Math.max(0, (prev || 1) - 1));
+        if (parentSetTotalProjectsCount) {
+          parentSetTotalProjectsCount((prev) => Math.max(0, (prev || 1) - 1));
+        }
+        if (setCounts) {
+          setCounts((prev) => {
+            const updated = { ...prev, totalProjects: Math.max(0, (prev.totalProjects || 1) - 1) };
+            try { localStorage.setItem("app_counts", JSON.stringify(updated)); } catch (e) { }
+            return updated;
+          });
+        }
         fetchProjects(currentPage, itemsPerPage, searchQuery, true);
         if (selectedProject && (selectedProject.id || selectedProject._id) === delId) {
           setSelectedProject(null);
@@ -1559,7 +1671,18 @@ export function ProjectsView({
           </div>
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            Showing <span className="font-semibold text-foreground">{totalProjectsCount}</span> Total Projects
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchProjects(currentPage, itemsPerPage, searchQuery, true)}
+              disabled={isRefreshing}
+              className="h-8 px-2.5 text-xs font-medium gap-1.5"
+              title="Refresh projects list"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-primary" : "text-muted-foreground"}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+            <span>Showing <span className="font-semibold text-foreground">{totalProjectsCount}</span> Total Projects</span>
           </div>
         </div>
       </div>
@@ -1728,7 +1851,9 @@ export function ProjectsView({
                   <Button
                     type="button"
                     onClick={() => {
-                      fetchTimelyUpdates(selectedProject.id || selectedProject._id);
+                      if (!selectedProject.timelyUpdates || selectedProject.timelyUpdates.length === 0) {
+                        fetchTimelyUpdates(selectedProject.id || selectedProject._id);
+                      }
                       setShowTimelyUpdatesModal(true);
                     }}
                     className="w-full mt-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-md font-medium text-xs flex items-center justify-between py-2 px-3.5 rounded-xl border border-amber-400/30 transition-all hover:scale-[1.01]"

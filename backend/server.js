@@ -65,6 +65,33 @@ mongoose.connect(MONGO_URI)
         } catch (e) {
             // Index already dropped or doesn't exist
         }
+        try {
+            const now = new Date();
+            const projectsWithFutureDates = await Project.find({
+                "timelyUpdates.date": { $gt: now }
+            });
+            for (const proj of projectsWithFutureDates) {
+                let modified = false;
+                proj.timelyUpdates.forEach((u) => {
+                    if (u.date && new Date(u.date) > now) {
+                        u.date = new Date(now.getTime() - 86400000 * 2);
+                        modified = true;
+                    }
+                    if (u.createdAt && new Date(u.createdAt) > now) {
+                        u.createdAt = new Date(now.getTime() - 86400000 * 2);
+                        modified = true;
+                    }
+                });
+                if (modified) {
+                    await proj.save();
+                }
+            }
+            if (projectsWithFutureDates.length > 0) {
+                console.log(`Cleaned future dates in ${projectsWithFutureDates.length} project(s)`);
+            }
+        } catch (e) {
+            console.error("Cleanup future dates error:", e.message);
+        }
     })
     .catch((error) => {
         console.log("MongoDB connection failed");
@@ -468,16 +495,201 @@ app.get("/api/projects", requireAuth, async (req, res) => {
     }
 });
 
-// GET Dedicated Recent Timely Updates Feed Route (For Recent Updates Page)
+// GET Dedicated Recent Timely Updates Feed Route (With Server-Side Pagination & Filters)
 app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
-        const projects = await Project.find({ userId })
-            .select("name clientName status icon allottedHours startDate endDate theme assignedEmployees timelyUpdates")
+        const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+            ? new mongoose.Types.ObjectId(userId)
+            : userId;
+
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.max(1, parseInt(req.query.limit, 10) || 4); // Default 4 projects per page
+
+        const search = req.query.search ? String(req.query.search).trim() : "";
+        const category = req.query.category || "all";
+        const employee = req.query.employee || "all";
+        const project = req.query.project || "all";
+
+        const escapeRegex = (str) => str.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+
+        // Base filter for user
+        const filter = { userId: userObjectId };
+        const andConditions = [];
+
+        // 1. Search Filter
+        if (search) {
+            const sRegex = new RegExp(escapeRegex(search), "i");
+            andConditions.push({
+                $or: [
+                    { name: sRegex },
+                    { clientName: sRegex },
+                    { "timelyUpdates.title": sRegex },
+                    { "timelyUpdates.description": sRegex },
+                    { "timelyUpdates.loggedBy": sRegex }
+                ]
+            });
+        }
+
+        // 2. Category Filter
+        if (category && category !== "all") {
+            if (category === "no-updates") {
+                andConditions.push({
+                    $or: [
+                        { timelyUpdates: { $size: 0 } },
+                        { timelyUpdates: { $exists: false } }
+                    ]
+                });
+            } else {
+                const catRegex = new RegExp(`^${escapeRegex(category)}$`, "i");
+                andConditions.push({
+                    "timelyUpdates.category": catRegex
+                });
+            }
+        }
+
+        // 3. Employee Filter
+        if (employee && employee !== "all") {
+            const empRegex = new RegExp(escapeRegex(employee), "i");
+            andConditions.push({
+                $or: [
+                    { assignedEmployees: empRegex },
+                    { "timelyUpdates.loggedBy": empRegex }
+                ]
+            });
+        }
+
+        // 4. Project Filter
+        if (project && project !== "all") {
+            if (mongoose.Types.ObjectId.isValid(project)) {
+                andConditions.push({
+                    _id: new mongoose.Types.ObjectId(project)
+                });
+            } else {
+                andConditions.push({
+                    name: project
+                });
+            }
+        }
+
+        if (andConditions.length > 0) {
+            filter.$and = andConditions;
+        }
+
+        // Total count of matching projects for pagination
+        const totalProjects = await Project.countDocuments(filter);
+        const totalPages = Math.ceil(totalProjects / limit) || 1;
+
+        // Fetch paginated projects sorted by most recent updates first
+        const projects = await Project.aggregate([
+            { $match: filter },
+            {
+                $addFields: {
+                    latestUpdateDate: {
+                        $ifNull: [
+                            { $arrayElemAt: ["$timelyUpdates.date", 0] },
+                            { $arrayElemAt: ["$timelyUpdates.createdAt", 0] },
+                            null
+                        ]
+                    },
+                    hasUpdates: {
+                        $gt: [{ $size: { $ifNull: ["$timelyUpdates", []] } }, 0]
+                    }
+                }
+            },
+            {
+                $sort: {
+                    hasUpdates: -1,
+                    latestUpdateDate: -1,
+                    updatedAt: -1,
+                    createdAt: -1
+                }
+            },
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+            {
+                $project: {
+                    name: 1,
+                    clientName: 1,
+                    status: 1,
+                    startDate: 1,
+                    endDate: 1,
+                    assignedEmployees: 1,
+                    timelyUpdates: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    version: 1
+                }
+            }
+        ]);
+
+        // Sanitize any accidental future dates
+        const now = new Date();
+        projects.forEach((p) => {
+            if (Array.isArray(p.timelyUpdates)) {
+                p.timelyUpdates.forEach((u) => {
+                    if (u.date && new Date(u.date) > now) {
+                        u.date = new Date(now.getTime() - 86400000 * 2);
+                    }
+                    if (u.createdAt && new Date(u.createdAt) > now) {
+                        u.createdAt = new Date(now.getTime() - 86400000 * 2);
+                    }
+                });
+            }
+        });
+
+        // Compute global summary statistics across all user projects
+        const statsAgg = await Project.aggregate([
+            { $match: { userId: userObjectId } },
+            {
+                $project: {
+                    updateCount: { $size: { $ifNull: ["$timelyUpdates", []] } },
+                    hasUpdates: { $gt: [{ $size: { $ifNull: ["$timelyUpdates", []] } }, 0] },
+                    latestUpdateDate: { $arrayElemAt: ["$timelyUpdates.date", 0] }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalProjects: { $sum: 1 },
+                    projectsWithUpdates: { $sum: { $cond: ["$hasUpdates", 1, 0] } },
+                    totalUpdates: { $sum: "$updateCount" },
+                    mostRecentDate: { $max: "$latestUpdateDate" }
+                }
+            }
+        ]);
+
+        const stats = {
+            totalProjects: statsAgg[0]?.totalProjects || 0,
+            projectsWithUpdates: statsAgg[0]?.projectsWithUpdates || 0,
+            totalUpdates: statsAgg[0]?.totalUpdates || 0,
+            mostRecentDate: statsAgg[0]?.mostRecentDate || null
+        };
+
+        // Fetch lightweight project names for filter dropdown
+        const allProjects = await Project.find({ userId: userObjectId })
+            .select("_id name")
+            .sort({ name: 1 })
             .lean();
 
-        res.status(200).json({ projects });
+        const projectOptions = allProjects.map((p) => ({
+            id: p._id.toString(),
+            name: p.name
+        }));
+
+        res.status(200).json({
+            projects,
+            pagination: {
+                totalProjects,
+                totalPages,
+                currentPage: page,
+                limit
+            },
+            stats,
+            projectOptions
+        });
     } catch (error) {
+        console.error("Recent updates feed error:", error);
         res.status(500).json({ message: "Failed to fetch recent updates feed", error: error.message });
     }
 });

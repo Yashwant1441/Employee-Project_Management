@@ -28,48 +28,190 @@ import {
   ArrowUpRight,
   Activity,
   Tag,
-  Loader2
+  Loader2,
+  RefreshCw
 } from "lucide-react";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+
+// Module-level persistent cache across route changes and in-flight promise deduplication
+const feedPageCache = new Map();
+const activeFeedFetchPromises = new Map();
+const CACHE_TTL_MS = 60 * 1000; // Cache for 60 seconds
+
+export const invalidateRecentUpdatesCache = () => {
+  feedPageCache.clear();
+  activeFeedFetchPromises.clear();
+};
+
+export const updateRecentUpdatesProjectTimelyUpdates = (projectId, timelyUpdates) => {
+  feedPageCache.forEach((entry) => {
+    if (entry && Array.isArray(entry.projects)) {
+      entry.projects = entry.projects.map((p) =>
+        String(p._id || p.id) === String(projectId)
+          ? { ...p, timelyUpdates }
+          : p
+      );
+      entry.timestamp = Date.now();
+    }
+  });
+};
 
 export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 4; // User requirement: strictly 4 projects timely update per page
+  const [totalProjectsCount, setTotalProjectsCount] = useState(0);
+  const [totalPagesCount, setTotalPagesCount] = useState(1);
+  const [feedStats, setFeedStats] = useState({
+    totalProjects: 0,
+    projectsWithUpdates: 0,
+    totalUpdates: 0,
+    mostRecentDate: null,
+  });
+  const [serverProjectOptions, setServerProjectOptions] = useState([]);
+
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedEmployee, setSelectedEmployee] = useState("all");
   const [selectedProject, setSelectedProject] = useState("all");
   const [expandedProjects, setExpandedProjects] = useState({});
+
   const [feedProjects, setFeedProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Debounce search input by 400ms to avoid flooding requests while typing
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  const prevFiltersRef = useRef({
+    search: debouncedSearch,
+    category: selectedCategory,
+    employee: selectedEmployee,
+    project: selectedProject,
+  });
+
+  const fetchRecentUpdatesFeed = async (page = currentPage, force = false) => {
+    const searchVal = debouncedSearch.trim();
+    const cacheKey = `${page}_${itemsPerPage}_${searchVal.toLowerCase()}_${selectedCategory}_${selectedEmployee}_${selectedProject}`;
+    const cached = feedPageCache.get(cacheKey);
+    const isCacheValid = cached && Date.now() - cached.timestamp < CACHE_TTL_MS;
+
+    if (!force && isCacheValid) {
+      setFeedProjects(cached.projects);
+      setTotalProjectsCount(cached.pagination?.totalProjects || 0);
+      setTotalPagesCount(cached.pagination?.totalPages || 1);
+      if (cached.stats) setFeedStats(cached.stats);
+      if (cached.projectOptions && cached.projectOptions.length > 0) {
+        setServerProjectOptions(cached.projectOptions);
+      }
+      setIsLoading(false);
+      return;
+    }
+
+    if (force) {
+      setIsRefreshing(true);
+    } else if (!cached) {
+      setIsLoading(true);
+    }
+
+    try {
+      if (!activeFeedFetchPromises.has(cacheKey) || force) {
+        const fetchPromise = (async () => {
+          const token = localStorage.getItem("app_token");
+          const queryParams = new URLSearchParams({
+            page: String(page),
+            limit: String(itemsPerPage),
+            search: searchVal,
+            category: selectedCategory,
+            employee: selectedEmployee,
+            project: selectedProject,
+          });
+
+          const res = await fetch(`${API_BASE_URL}/api/projects/recent-updates-feed?${queryParams.toString()}`, {
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+          const data = await res.json();
+          if (res.ok && data.projects) {
+            const entry = {
+              projects: data.projects,
+              pagination: data.pagination || {
+                totalProjects: data.projects.length,
+                totalPages: 1,
+                currentPage: page,
+                limit: itemsPerPage,
+              },
+              stats: data.stats || null,
+              projectOptions: data.projectOptions || [],
+              timestamp: Date.now(),
+            };
+            feedPageCache.set(cacheKey, entry);
+            return entry;
+          }
+          return null;
+        })().finally(() => {
+          activeFeedFetchPromises.delete(cacheKey);
+        });
+
+        activeFeedFetchPromises.set(cacheKey, fetchPromise);
+      }
+
+      const result = await activeFeedFetchPromises.get(cacheKey);
+      if (result) {
+        setFeedProjects(result.projects);
+        setTotalProjectsCount(result.pagination?.totalProjects || 0);
+        setTotalPagesCount(result.pagination?.totalPages || 1);
+        if (result.stats) setFeedStats(result.stats);
+        if (result.projectOptions && result.projectOptions.length > 0) {
+          setServerProjectOptions(result.projectOptions);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch recent updates feed:", err);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    let isMounted = true;
-    const fetchRecentUpdatesFeed = async () => {
-      try {
-        setIsLoading(true);
-        const token = localStorage.getItem("app_token");
-        const res = await fetch(`${API_BASE_URL}/api/projects/recent-updates-feed`, {
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-        const data = await res.json();
-        if (res.ok && data.projects && isMounted) {
-          setFeedProjects(data.projects);
-        }
-      } catch (err) {
-        console.error("Failed to fetch recent updates feed:", err);
-      } finally {
-        if (isMounted) setIsLoading(false);
+    const prev = prevFiltersRef.current;
+    const filterChanged =
+      prev.search !== debouncedSearch ||
+      prev.category !== selectedCategory ||
+      prev.employee !== selectedEmployee ||
+      prev.project !== selectedProject;
+
+    if (filterChanged) {
+      prevFiltersRef.current = {
+        search: debouncedSearch,
+        category: selectedCategory,
+        employee: selectedEmployee,
+        project: selectedProject,
+      };
+      if (currentPage !== 1) {
+        setCurrentPage(1);
+        return;
       }
-    };
+    }
 
-    fetchRecentUpdatesFeed();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const activeProjectsList = feedProjects.length > 0 ? feedProjects : projects;
+    fetchRecentUpdatesFeed(currentPage);
+  }, [currentPage, debouncedSearch, selectedCategory, selectedEmployee, selectedProject]);
 
   const toggleExpand = (projectId) => {
     setExpandedProjects((prev) => ({
@@ -80,29 +222,21 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
 
   const getUpdateTimestamp = (u) => {
     if (!u) return 0;
-    const cTime = u.createdAt ? new Date(u.createdAt).getTime() : 0;
-    const dTime = u.date ? new Date(u.date).getTime() : 0;
+    const now = Date.now();
+    let cTime = u.createdAt ? new Date(u.createdAt).getTime() : 0;
+    let dTime = u.date ? new Date(u.date).getTime() : 0;
+    if (cTime > now) cTime = now - 60000;
+    if (dTime > now) dTime = now - 60000;
     return Math.max(cTime, dTime);
   };
 
-  // Process projects to find latest timely update timestamp and sort accordingly
+  // Process current page projects (strictly 4) to prepare updates and latest update timestamp
   const processedProjects = useMemo(() => {
-    return (activeProjectsList || []).map((project) => {
+    return (feedProjects || []).map((project) => {
       const updates = Array.isArray(project.timelyUpdates) ? project.timelyUpdates : [];
-      
-      // Find the latest update date
-      let latestTimestamp = 0;
-      let latestUpdateObj = null;
-
-      if (updates.length > 0) {
-        updates.forEach((u) => {
-          const t = getUpdateTimestamp(u);
-          if (t > latestTimestamp) {
-            latestTimestamp = t;
-            latestUpdateObj = u;
-          }
-        });
-      }
+      // Index 0 is always the newest update (unshifted on creation)
+      const latestUpdateObj = updates.length > 0 ? updates[0] : null;
+      const latestTimestamp = latestUpdateObj ? getUpdateTimestamp(latestUpdateObj) : 0;
 
       return {
         ...project,
@@ -112,20 +246,10 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
         hasUpdates: updates.length > 0,
       };
     });
-  }, [activeProjectsList]);
+  }, [feedProjects]);
 
-  // Sort projects: Projects with updates first (ordered by newest update timestamp), then projects without updates
-  const sortedProjects = useMemo(() => {
-    return [...processedProjects].sort((a, b) => {
-      if (a.hasUpdates !== b.hasUpdates) {
-        return a.hasUpdates ? -1 : 1;
-      }
-      if (a.hasUpdates && b.hasUpdates) {
-        return b.latestTimestamp - a.latestTimestamp;
-      }
-      return new Date(b.createdAt || b.startDate || 0) - new Date(a.createdAt || a.startDate || 0);
-    });
-  }, [processedProjects]);
+  // Server-side query has already filtered and sorted the projects
+  const filteredProjects = processedProjects;
 
   // Extract unique employee names for filtering strictly from registered employees
   const employeeOptions = useMemo(() => {
@@ -135,102 +259,36 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
     return Array.from(new Set(names)).sort();
   }, [employees]);
 
-  // Extract unique projects for filtering
+  // Extract unique projects for filtering from server project options & props
   const projectOptions = useMemo(() => {
-    const list = [];
-    (activeProjectsList || []).forEach((p) => {
+    const map = new Map();
+    (serverProjectOptions || []).forEach((p) => {
       if (p && p.name) {
-        list.push({ id: p.id || p._id || p.name, name: p.name });
+        map.set(p.name, { id: p.id || p._id || p.name, name: p.name });
       }
     });
-    return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [activeProjectsList]);
-
-  // Filter projects by search query, selected category, employee, and project
-  const filteredProjects = useMemo(() => {
-    return sortedProjects.filter((project) => {
-      const query = searchQuery.toLowerCase().trim();
-      
-      // Match search in project name, client, or any update title/description
-      const matchesName = (project.name || "").toLowerCase().includes(query);
-      const matchesClient = (project.clientName || "").toLowerCase().includes(query);
-      const matchesUpdates = project.updatesList.some(
-        (u) =>
-          (u.title || "").toLowerCase().includes(query) ||
-          (u.description || "").toLowerCase().includes(query) ||
-          (u.loggedBy || "").toLowerCase().includes(query)
-      );
-
-      const matchesSearch = !query || matchesName || matchesClient || matchesUpdates;
-
-      // Match category filter
-      let matchesCat = true;
-      if (selectedCategory !== "all") {
-        if (selectedCategory === "no-updates") {
-          matchesCat = !project.hasUpdates;
-        } else {
-          matchesCat = project.updatesList.some(
-            (u) => (u.category || "observation").toLowerCase() === selectedCategory
-          );
-        }
+    (projects || []).forEach((p) => {
+      if (p && p.name && !map.has(p.name)) {
+        map.set(p.name, { id: p.id || p._id || p.name, name: p.name });
       }
-
-      // Match employee filter
-      let matchesEmp = true;
-      if (selectedEmployee !== "all") {
-        const selEmpObj = (employees || []).find(
-          (e) => (e.name || "").trim().toLowerCase() === selectedEmployee.toLowerCase()
-        );
-        const targetNameLower = selectedEmployee.toLowerCase();
-        const targetIdLower = selEmpObj?.employeeId?.toLowerCase() || "";
-
-        const assignedList = Array.isArray(project.assignedEmployees)
-          ? project.assignedEmployees
-          : typeof project.assignedEmployees === "string"
-          ? project.assignedEmployees.split(",").map((s) => s.trim())
-          : [];
-
-        const isAssigned = assignedList.some((n) => {
-          const nLower = (n || "").toLowerCase();
-          return (
-            nLower === targetNameLower ||
-            (targetIdLower && nLower === targetIdLower) ||
-            nLower.includes(targetNameLower) ||
-            targetNameLower.includes(nLower)
-          );
-        });
-
-        const loggedAnUpdate = project.updatesList.some((u) => {
-          const loggedLower = (u.loggedBy || "").toLowerCase();
-          return (
-            loggedLower === targetNameLower ||
-            (targetIdLower && loggedLower === targetIdLower) ||
-            loggedLower.includes(targetNameLower)
-          );
-        });
-
-        matchesEmp = isAssigned || loggedAnUpdate;
-      }
-
-      // Match project filter
-      let matchesProj = true;
-      if (selectedProject !== "all") {
-        const pId = project.id || project._id || project.name;
-        matchesProj = pId === selectedProject || project.name === selectedProject;
-      }
-
-      return matchesSearch && matchesCat && matchesEmp && matchesProj;
     });
-  }, [sortedProjects, searchQuery, selectedCategory, selectedEmployee, selectedProject]);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [serverProjectOptions, projects]);
 
-  // Overall Statistics
-  const totalUpdatesCount = useMemo(() => {
-    return processedProjects.reduce((acc, p) => acc + p.updatesList.length, 0);
-  }, [processedProjects]);
-
-  const projectsWithUpdatesCount = useMemo(() => {
-    return processedProjects.filter((p) => p.hasUpdates).length;
-  }, [processedProjects]);
+  const getPageNumbers = () => {
+    if (totalPagesCount <= 7) {
+      return Array.from({ length: totalPagesCount }, (_, i) => i + 1);
+    }
+    const pages = [];
+    if (currentPage <= 4) {
+      pages.push(1, 2, 3, 4, 5, "ellipsis-end", totalPagesCount);
+    } else if (currentPage >= totalPagesCount - 3) {
+      pages.push(1, "ellipsis-start", totalPagesCount - 4, totalPagesCount - 3, totalPagesCount - 2, totalPagesCount - 1, totalPagesCount);
+    } else {
+      pages.push(1, "ellipsis-start", currentPage - 1, currentPage, currentPage + 1, "ellipsis-end", totalPagesCount);
+    }
+    return pages;
+  };
 
   const formatDate = (item) => {
     if (!item) return "N/A";
@@ -329,12 +387,24 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchRecentUpdatesFeed(true)}
+              disabled={isRefreshing}
+              className="gap-1.5 h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              title="Refresh updates feed"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-primary" : ""}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+
             <Button
               variant="outline"
               size="sm"
               onClick={() => navigate && navigate("/projects")}
-              className="gap-2"
+              className="gap-2 h-8 text-xs"
             >
               <Briefcase className="w-4 h-4 text-primary" /> Manage Projects
             </Button>
@@ -350,7 +420,9 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
               <Activity className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-2xl font-bold font-mono">{projectsWithUpdatesCount} / {projects.length}</div>
+              <div className="text-2xl font-bold font-mono">
+                {feedStats.projectsWithUpdates} / {feedStats.totalProjects || totalProjectsCount}
+              </div>
               <div className="text-xs text-muted-foreground">Projects with Updates Logged</div>
             </div>
           </CardContent>
@@ -362,7 +434,7 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
               <MessageSquare className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-2xl font-bold font-mono">{totalUpdatesCount}</div>
+              <div className="text-2xl font-bold font-mono">{feedStats.totalUpdates}</div>
               <div className="text-xs text-muted-foreground">Total Timely Log Entries</div>
             </div>
           </CardContent>
@@ -375,8 +447,10 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
             </div>
             <div>
               <div className="text-xs font-bold text-foreground">
-                {sortedProjects.find((p) => p.hasUpdates)?.latestUpdateObj
-                  ? formatDate(sortedProjects.find((p) => p.hasUpdates).latestUpdateObj.date)
+                {feedStats.mostRecentDate
+                  ? formatDate(feedStats.mostRecentDate)
+                  : processedProjects.find((p) => p.hasUpdates)?.latestUpdateObj
+                  ? formatDate(processedProjects.find((p) => p.hasUpdates).latestUpdateObj.date)
                   : "No recent updates"}
               </div>
               <div className="text-xs text-muted-foreground">Most Recent Log Activity</div>
@@ -540,8 +614,9 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
           </div>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-6 items-start">
-          {filteredProjects.map((project) => {
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-6 items-start">
+            {filteredProjects.map((project) => {
             const isExpanded = !!expandedProjects[project.id || project._id];
             const latest = project.latestUpdateObj;
 
@@ -705,6 +780,59 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
             );
           })}
         </div>
+
+        {/* Server-Side Pagination Controls */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-6 mt-6">
+          <div className="text-xs text-muted-foreground">
+            Showing <span className="font-semibold text-foreground">{totalProjectsCount === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1}</span> to{" "}
+            <span className="font-semibold text-foreground">
+              {Math.min((currentPage - 1) * itemsPerPage + itemsPerPage, totalProjectsCount)}
+            </span>{" "}
+            of <span className="font-semibold text-foreground">{totalProjectsCount}</span> projects (Page {currentPage} of {totalPagesCount})
+          </div>
+
+          {totalPagesCount > 1 && (
+            <Pagination className="w-auto mx-0">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+                {getPageNumbers().map((pageItem, index) => {
+                  if (pageItem === "ellipsis-start" || pageItem === "ellipsis-end" || pageItem === "ellipsis") {
+                    return (
+                      <PaginationItem key={`ellipsis-${index}`}>
+                        <PaginationEllipsis />
+                      </PaginationItem>
+                    );
+                  }
+                  return (
+                    <PaginationItem key={pageItem}>
+                      <PaginationLink
+                        isActive={pageItem === currentPage}
+                        onClick={() => setCurrentPage(pageItem)}
+                        className="cursor-pointer"
+                      >
+                        {pageItem}
+                      </PaginationLink>
+                    </PaginationItem>
+                  );
+                })}
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPagesCount))}
+                    disabled={currentPage === totalPagesCount}
+                    className={currentPage === totalPagesCount ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          )}
+        </div>
+      </>
       )}
     </div>
   );
