@@ -65,24 +65,10 @@ const PALETTE = [
   "#64748b", // Slate
 ];
 
-// Persistent session cache across page navigation (no re-fetching when switching tabs)
+// In-memory cache across tab navigation (no re-fetching when switching tabs)
 let analyticsDataCache = {
-  data: (() => {
-    try {
-      const saved = sessionStorage.getItem("app_analytics_data");
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) {
-      return null;
-    }
-  })(),
-  timestamp: (() => {
-    try {
-      const savedTime = sessionStorage.getItem("app_analytics_timestamp");
-      return savedTime ? parseInt(savedTime, 10) : 0;
-    } catch (e) {
-      return 0;
-    }
-  })(),
+  data: null,
+  timestamp: 0,
 };
 let activeAnalyticsFetchPromise = null;
 
@@ -179,12 +165,6 @@ export function AnalyticsView({ currentUser, navigate }) {
         timestamp: now,
       };
 
-      try {
-        sessionStorage.setItem("app_analytics_data", JSON.stringify(data));
-        sessionStorage.setItem("app_analytics_timestamp", now.toString());
-      } catch (e) {
-        // Safe fallback if sessionStorage is restricted or full
-      }
 
       return data;
     })();

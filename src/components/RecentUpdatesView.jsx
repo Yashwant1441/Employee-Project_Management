@@ -63,28 +63,15 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 
-// Module-level persistent cache across route changes and in-flight promise deduplication
-const feedPageCache = new Map();
-const activeFeedFetchPromises = new Map();
-const CACHE_TTL_MS = 60 * 1000; // Cache for 60 seconds
+// In-flight request deduplication (prevents duplicate parallel API calls on mount/re-render)
+let activeFeedFetchPromise = null;
+let activeFeedFetchKey = null;
 
 export const invalidateRecentUpdatesCache = () => {
-  feedPageCache.clear();
-  activeFeedFetchPromises.clear();
+  activeFeedFetchPromise = null;
+  activeFeedFetchKey = null;
 };
-
-export const updateRecentUpdatesProjectTimelyUpdates = (projectId, timelyUpdates) => {
-  feedPageCache.forEach((entry) => {
-    if (entry && Array.isArray(entry.projects)) {
-      entry.projects = entry.projects.map((p) =>
-        String(p._id || p.id) === String(projectId)
-          ? { ...p, timelyUpdates }
-          : p
-      );
-      entry.timestamp = Date.now();
-    }
-  });
-};
+export const updateRecentUpdatesProjectTimelyUpdates = () => {};
 
 export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
   const [currentPage, setCurrentPage] = useState(1);
@@ -245,88 +232,63 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
 
   const fetchRecentUpdatesFeed = async (page = currentPage, force = false) => {
     const searchVal = debouncedSearch.trim();
-    const cacheKey = `${page}_${itemsPerPage}_${searchVal.toLowerCase()}_${selectedCategory}_${selectedEmployee}_${selectedProject}`;
-    const cached = feedPageCache.get(cacheKey);
-    const isCacheValid = cached && Date.now() - cached.timestamp < CACHE_TTL_MS;
+    const requestKey = `${page}_${itemsPerPage}_${searchVal.toLowerCase()}_${selectedCategory}_${selectedEmployee}_${selectedProject}`;
 
-    if (!force && isCacheValid) {
-      setFeedProjects(cached.projects);
-      setTotalProjectsCount(cached.pagination?.totalProjects || 0);
-      setTotalPagesCount(cached.pagination?.totalPages || 1);
-      if (cached.stats) setFeedStats(cached.stats);
-      if (cached.projectOptions && cached.projectOptions.length > 0) {
-        setServerProjectOptions(cached.projectOptions);
-      }
-      setIsLoading(false);
-      return;
+    // If an identical request is already in-flight, return that promise to prevent calling twice
+    if (activeFeedFetchKey === requestKey && activeFeedFetchPromise && !force) {
+      return activeFeedFetchPromise;
     }
 
     if (force) {
       setIsRefreshing(true);
-    } else if (!cached) {
+    } else {
       setIsLoading(true);
     }
 
-    try {
-      if (!activeFeedFetchPromises.has(cacheKey) || force) {
-        const fetchPromise = (async () => {
-          const token = localStorage.getItem("app_token");
-          const queryParams = new URLSearchParams({
-            page: String(page),
-            limit: String(itemsPerPage),
-            search: searchVal,
-            category: selectedCategory,
-            employee: selectedEmployee,
-            project: selectedProject,
-          });
-
-          const res = await fetch(`${API_BASE_URL}/api/projects/recent-updates-feed?${queryParams.toString()}`, {
-            headers: {
-              "Content-Type": "application/json",
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-          });
-          const data = await res.json();
-          if (res.ok && data.projects) {
-            const entry = {
-              projects: data.projects,
-              pagination: data.pagination || {
-                totalProjects: data.projects.length,
-                totalPages: 1,
-                currentPage: page,
-                limit: itemsPerPage,
-              },
-              stats: data.stats || null,
-              projectOptions: data.projectOptions || [],
-              timestamp: Date.now(),
-            };
-            feedPageCache.set(cacheKey, entry);
-            return entry;
-          }
-          return null;
-        })().finally(() => {
-          activeFeedFetchPromises.delete(cacheKey);
+    const fetchPromise = (async () => {
+      try {
+        const token = localStorage.getItem("app_token");
+        const queryParams = new URLSearchParams({
+          page: String(page),
+          limit: String(itemsPerPage),
+          search: searchVal,
+          category: selectedCategory,
+          employee: selectedEmployee,
+          project: selectedProject,
         });
 
-        activeFeedFetchPromises.set(cacheKey, fetchPromise);
-      }
-
-      const result = await activeFeedFetchPromises.get(cacheKey);
-      if (result) {
-        setFeedProjects(result.projects);
-        setTotalProjectsCount(result.pagination?.totalProjects || 0);
-        setTotalPagesCount(result.pagination?.totalPages || 1);
-        if (result.stats) setFeedStats(result.stats);
-        if (result.projectOptions && result.projectOptions.length > 0) {
-          setServerProjectOptions(result.projectOptions);
+        const res = await fetch(`${API_BASE_URL}/api/projects/recent-updates-feed?${queryParams.toString()}`, {
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        const data = await res.json();
+        if (res.ok && data.projects) {
+          setFeedProjects(data.projects);
+          setTotalProjectsCount(data.pagination?.totalProjects || 0);
+          setTotalPagesCount(data.pagination?.totalPages || 1);
+          if (data.stats) setFeedStats(data.stats);
+          if (data.projectOptions && data.projectOptions.length > 0) {
+            setServerProjectOptions(data.projectOptions);
+          }
         }
+      } catch (err) {
+        console.error("Failed to fetch recent updates feed:", err);
+      } finally {
+        if (activeFeedFetchKey === requestKey) {
+          activeFeedFetchKey = null;
+          activeFeedFetchPromise = null;
+        }
+        setIsLoading(false);
+        setIsRefreshing(false);
       }
-    } catch (err) {
-      console.error("Failed to fetch recent updates feed:", err);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
+    })();
+
+    activeFeedFetchKey = requestKey;
+    activeFeedFetchPromise = fetchPromise;
+
+    return fetchPromise;
   };
 
   useEffect(() => {
@@ -607,7 +569,7 @@ export function RecentUpdatesView({ projects = [], employees = [], navigate }) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => fetchRecentUpdatesFeed(true)}
+              onClick={() => fetchRecentUpdatesFeed(currentPage, true)}
               disabled={isRefreshing}
               className="gap-1.5 h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
               title="Refresh updates feed"
