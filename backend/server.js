@@ -583,8 +583,8 @@ app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
             filter.$and = andConditions;
         }
 
-        // Execute Paginated Feed (with $facet for single-pass count+data), Global Stats, and Project Dropdowns in parallel
-        const [feedAggResult, statsAggResult, allProjects] = await Promise.all([
+        // Execute Paginated Feed (with $facet for single-pass count+data) and Global Stats in parallel
+        const [feedAggResult, statsAggResult] = await Promise.all([
             // Pipeline 1: Single-pass Pagination with $facet (Total Count + Paginated Slices)
             Project.aggregate([
                 { $match: filter },
@@ -653,13 +653,7 @@ app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
                         mostRecentDate: { $max: "$latestUpdateDate" }
                     }
                 }
-            ]),
-
-            // Query 3: Lightweight project names for filter dropdown
-            Project.find(userMatch)
-                .select("_id name")
-                .sort({ name: 1 })
-                .lean()
+            ])
         ]);
 
         const feedFacet = feedAggResult[0] || {};
@@ -690,11 +684,6 @@ app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
             mostRecentDate: statsAgg.mostRecentDate || null
         };
 
-        const projectOptions = (allProjects || []).map((p) => ({
-            id: p._id.toString(),
-            name: p.name
-        }));
-
         res.status(200).json({
             projects,
             pagination: {
@@ -703,12 +692,65 @@ app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
                 currentPage: page,
                 limit
             },
-            stats,
-            projectOptions
+            stats
         });
     } catch (error) {
         console.error("Recent updates feed error:", error);
         res.status(500).json({ message: "Failed to fetch recent updates feed", error: error.message });
+    }
+});
+
+// Dedicated Paginated Dropdown Options endpoint (Infinite Scroll support)
+app.get("/api/projects/dropdown-options", requireAuth, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+            ? new mongoose.Types.ObjectId(userId)
+            : userId;
+
+        const userMatch = {
+            $or: [
+                { userId: userObjectId },
+                { userId: String(userId) }
+            ]
+        };
+
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 25));
+        const search = req.query.search ? String(req.query.search).trim() : "";
+
+        const query = { ...userMatch };
+        if (search) {
+            const escapeRegex = (str) => str.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+            query.name = new RegExp(escapeRegex(search), "i");
+        }
+
+        const [totalCount, projects] = await Promise.all([
+            Project.countDocuments(query),
+            Project.find(query)
+                .select("_id name clientName")
+                .sort({ name: 1 })
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .lean()
+        ]);
+
+        const hasMore = page * limit < totalCount;
+
+        res.status(200).json({
+            options: (projects || []).map((p) => ({
+                id: p._id.toString(),
+                name: p.name,
+                clientName: p.clientName || ""
+            })),
+            page,
+            limit,
+            totalCount,
+            hasMore
+        });
+    } catch (error) {
+        console.error("Project dropdown options error:", error);
+        res.status(500).json({ message: "Failed to fetch project dropdown options", error: error.message });
     }
 });
 
