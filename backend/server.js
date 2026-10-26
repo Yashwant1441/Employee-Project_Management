@@ -495,13 +495,20 @@ app.get("/api/projects", requireAuth, async (req, res) => {
     }
 });
 
-// GET Dedicated Recent Timely Updates Feed Route (With Server-Side Pagination & Filters)
+// GET Dedicated Recent Timely Updates Feed Route (With High-Performance Aggregation Pipeline & Server-Side Pagination)
 app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
     try {
         const userId = req.userId;
         const userObjectId = mongoose.Types.ObjectId.isValid(userId)
             ? new mongoose.Types.ObjectId(userId)
             : userId;
+
+        const userMatch = {
+            $or: [
+                { userId: userObjectId },
+                { userId: String(userId) }
+            ]
+        };
 
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.max(1, parseInt(req.query.limit, 10) || 4); // Default 4 projects per page
@@ -514,7 +521,7 @@ app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
         const escapeRegex = (str) => str.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
 
         // Base filter for user
-        const filter = { userId: userObjectId };
+        const filter = { ...userMatch };
         const andConditions = [];
 
         // 1. Search Filter
@@ -576,52 +583,89 @@ app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
             filter.$and = andConditions;
         }
 
-        // Total count of matching projects for pagination
-        const totalProjects = await Project.countDocuments(filter);
-        const totalPages = Math.ceil(totalProjects / limit) || 1;
-
-        // Fetch paginated projects sorted by most recent updates first
-        const projects = await Project.aggregate([
-            { $match: filter },
-            {
-                $addFields: {
-                    latestUpdateDate: {
-                        $ifNull: [
-                            { $arrayElemAt: ["$timelyUpdates.date", 0] },
-                            { $arrayElemAt: ["$timelyUpdates.createdAt", 0] },
-                            null
+        // Execute Paginated Feed (with $facet for single-pass count+data), Global Stats, and Project Dropdowns in parallel
+        const [feedAggResult, statsAggResult, allProjects] = await Promise.all([
+            // Pipeline 1: Single-pass Pagination with $facet (Total Count + Paginated Slices)
+            Project.aggregate([
+                { $match: filter },
+                {
+                    $facet: {
+                        totalCount: [{ $count: "count" }],
+                        paginatedProjects: [
+                            {
+                                $addFields: {
+                                    latestUpdateDate: {
+                                        $ifNull: [
+                                            { $arrayElemAt: ["$timelyUpdates.date", 0] },
+                                            { $arrayElemAt: ["$timelyUpdates.createdAt", 0] },
+                                            null
+                                        ]
+                                    },
+                                    hasUpdates: {
+                                        $gt: [{ $size: { $ifNull: ["$timelyUpdates", []] } }, 0]
+                                    }
+                                }
+                            },
+                            {
+                                $sort: {
+                                    hasUpdates: -1,
+                                    latestUpdateDate: -1,
+                                    updatedAt: -1,
+                                    createdAt: -1
+                                }
+                            },
+                            { $skip: (page - 1) * limit },
+                            { $limit: limit },
+                            {
+                                $project: {
+                                    name: 1,
+                                    clientName: 1,
+                                    status: 1,
+                                    startDate: 1,
+                                    endDate: 1,
+                                    timelyUpdates: 1,
+                                    createdAt: 1,
+                                    updatedAt: 1,
+                                    version: 1
+                                }
+                            }
                         ]
-                    },
-                    hasUpdates: {
-                        $gt: [{ $size: { $ifNull: ["$timelyUpdates", []] } }, 0]
                     }
                 }
-            },
-            {
-                $sort: {
-                    hasUpdates: -1,
-                    latestUpdateDate: -1,
-                    updatedAt: -1,
-                    createdAt: -1
+            ]),
+
+            // Pipeline 2: Global Summary Statistics across all user projects
+            Project.aggregate([
+                { $match: userMatch },
+                {
+                    $project: {
+                        updateCount: { $size: { $ifNull: ["$timelyUpdates", []] } },
+                        hasUpdates: { $gt: [{ $size: { $ifNull: ["$timelyUpdates", []] } }, 0] },
+                        latestUpdateDate: { $arrayElemAt: ["$timelyUpdates.date", 0] }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalProjects: { $sum: 1 },
+                        projectsWithUpdates: { $sum: { $cond: ["$hasUpdates", 1, 0] } },
+                        totalUpdates: { $sum: "$updateCount" },
+                        mostRecentDate: { $max: "$latestUpdateDate" }
+                    }
                 }
-            },
-            { $skip: (page - 1) * limit },
-            { $limit: limit },
-            {
-                $project: {
-                    name: 1,
-                    clientName: 1,
-                    status: 1,
-                    startDate: 1,
-                    endDate: 1,
-                    assignedEmployees: 1,
-                    timelyUpdates: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    version: 1
-                }
-            }
+            ]),
+
+            // Query 3: Lightweight project names for filter dropdown
+            Project.find(userMatch)
+                .select("_id name")
+                .sort({ name: 1 })
+                .lean()
         ]);
+
+        const feedFacet = feedAggResult[0] || {};
+        const totalProjects = feedFacet.totalCount?.[0]?.count || 0;
+        const totalPages = Math.ceil(totalProjects / limit) || 1;
+        const projects = feedFacet.paginatedProjects || [];
 
         // Sanitize any accidental future dates
         const now = new Date();
@@ -638,41 +682,15 @@ app.get("/api/projects/recent-updates-feed", requireAuth, async (req, res) => {
             }
         });
 
-        // Compute global summary statistics across all user projects
-        const statsAgg = await Project.aggregate([
-            { $match: { userId: userObjectId } },
-            {
-                $project: {
-                    updateCount: { $size: { $ifNull: ["$timelyUpdates", []] } },
-                    hasUpdates: { $gt: [{ $size: { $ifNull: ["$timelyUpdates", []] } }, 0] },
-                    latestUpdateDate: { $arrayElemAt: ["$timelyUpdates.date", 0] }
-                }
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalProjects: { $sum: 1 },
-                    projectsWithUpdates: { $sum: { $cond: ["$hasUpdates", 1, 0] } },
-                    totalUpdates: { $sum: "$updateCount" },
-                    mostRecentDate: { $max: "$latestUpdateDate" }
-                }
-            }
-        ]);
-
+        const statsAgg = statsAggResult[0] || {};
         const stats = {
-            totalProjects: statsAgg[0]?.totalProjects || 0,
-            projectsWithUpdates: statsAgg[0]?.projectsWithUpdates || 0,
-            totalUpdates: statsAgg[0]?.totalUpdates || 0,
-            mostRecentDate: statsAgg[0]?.mostRecentDate || null
+            totalProjects: statsAgg.totalProjects || 0,
+            projectsWithUpdates: statsAgg.projectsWithUpdates || 0,
+            totalUpdates: statsAgg.totalUpdates || 0,
+            mostRecentDate: statsAgg.mostRecentDate || null
         };
 
-        // Fetch lightweight project names for filter dropdown
-        const allProjects = await Project.find({ userId: userObjectId })
-            .select("_id name")
-            .sort({ name: 1 })
-            .lean();
-
-        const projectOptions = allProjects.map((p) => ({
+        const projectOptions = (allProjects || []).map((p) => ({
             id: p._id.toString(),
             name: p.name
         }));
