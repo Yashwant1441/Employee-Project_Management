@@ -1523,6 +1523,252 @@ STRICT INSTRUCTIONS FOR ANSWERS:
     }
 });
 
+// =========================================================================
+// Dedicated High-Performance Analytics Aggregation Pipeline (RFC Aggregations)
+// =========================================================================
+app.get("/api/analytics", requireAuth, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+            ? new mongoose.Types.ObjectId(userId)
+            : userId;
+
+        const userMatch = {
+            $or: [
+                { userId: userObjectId },
+                { userId: String(userId) }
+            ]
+        };
+
+        const today = new Date();
+
+        // Run both Project and Employee aggregations in parallel inside MongoDB C++ Engine
+        const [projectAggResult, employeeAggResult] = await Promise.all([
+            Project.aggregate([
+                { $match: userMatch },
+                {
+                    $facet: {
+                        statusSummary: [
+                            {
+                                $group: {
+                                    _id: "$status",
+                                    count: { $sum: 1 },
+                                    hours: { $sum: "$allottedHours" }
+                                }
+                            }
+                        ],
+                        overdueStats: [
+                            {
+                                $match: {
+                                    endDate: { $lt: today },
+                                    status: { $ne: "Completed" }
+                                }
+                            },
+                            { $count: "count" }
+                        ],
+                        languages: [
+                            { $match: { language: { $exists: true, $ne: "" } } },
+                            { $group: { _id: "$language", count: { $sum: 1 } } },
+                            { $sort: { count: -1 } },
+                            { $limit: 8 }
+                        ],
+                        databases: [
+                            { $match: { database: { $exists: true, $ne: "" } } },
+                            { $group: { _id: "$database", count: { $sum: 1 } } },
+                            { $sort: { count: -1 } },
+                            { $limit: 8 }
+                        ],
+                        topHoursProjects: [
+                            { $match: { allottedHours: { $gt: 0 } } },
+                            { $sort: { allottedHours: -1 } },
+                            { $limit: 6 },
+                            {
+                                $project: {
+                                    name: 1,
+                                    clientName: 1,
+                                    status: 1,
+                                    allottedHours: 1
+                                }
+                            }
+                        ],
+                        assignedBreakdown: [
+                            { $unwind: "$assignedEmployees" },
+                            { $match: { assignedEmployees: { $exists: true, $ne: "" } } },
+                            {
+                                $group: {
+                                    _id: { $toLower: "$assignedEmployees" },
+                                    rawName: { $first: "$assignedEmployees" },
+                                    count: { $sum: 1 }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]),
+            Employee.aggregate([
+                { $match: userMatch },
+                {
+                    $facet: {
+                        departments: [
+                            {
+                                $group: {
+                                    _id: { $ifNull: ["$department", "Unassigned"] },
+                                    count: { $sum: 1 }
+                                }
+                            },
+                            { $sort: { count: -1 } }
+                        ],
+                        allEmployees: [
+                            {
+                                $project: {
+                                    name: 1,
+                                    employeeId: 1,
+                                    department: 1,
+                                    avatar: 1
+                                }
+                            }
+                        ]
+                    }
+                }
+            ])
+        ]);
+
+        const pData = projectAggResult[0] || {};
+        const eData = employeeAggResult[0] || {};
+
+        // Calculate Project Status Totals & Hours
+        let totalProjects = 0;
+        let totalAllottedHours = 0;
+        let completedCount = 0;
+        let inProgressCount = 0;
+        let pendingCount = 0;
+        let delayedCount = 0;
+
+        const statusCounts = {};
+        (pData.statusSummary || []).forEach((item) => {
+            const name = item._id ? String(item._id).trim() : "Pending";
+            const cnt = Number(item.count) || 0;
+            const hrs = Number(item.hours) || 0;
+
+            totalProjects += cnt;
+            totalAllottedHours += hrs;
+            statusCounts[name] = (statusCounts[name] || 0) + cnt;
+
+            const lower = name.toLowerCase();
+            if (lower === "completed") completedCount += cnt;
+            else if (lower === "in progress") inProgressCount += cnt;
+            else if (lower === "delayed") delayedCount += cnt;
+            else pendingCount += cnt;
+        });
+
+        const overdueCount = pData.overdueStats?.[0]?.count || 0;
+
+        // Assigned Workforce Mapping
+        const assignmentMap = new Map();
+        (pData.assignedBreakdown || []).forEach((item) => {
+            if (item && item._id) {
+                assignmentMap.set(String(item._id).trim().toLowerCase(), item.count || 0);
+            }
+        });
+
+        // Parse Employees & Cross-reference Project Assignment
+        const allEmployeesList = eData.allEmployees || [];
+        const totalEmployees = allEmployeesList.length;
+
+        let assignedCount = 0;
+        const employeeWorkloads = allEmployeesList.map((emp) => {
+            const nameKey = String(emp.name || "").trim().toLowerCase();
+            const idKey = String(emp.employeeId || "").trim().toLowerCase();
+            const assigned = assignmentMap.get(nameKey) || assignmentMap.get(idKey) || 0;
+            if (assigned > 0) assignedCount++;
+
+            return {
+                id: emp._id ? emp._id.toString() : emp.id,
+                name: emp.name,
+                employeeId: emp.employeeId,
+                department: emp.department || "General",
+                avatar: emp.avatar || "",
+                assignedCount: assigned
+            };
+        });
+
+        employeeWorkloads.sort((a, b) => b.assignedCount - a.assignedCount);
+        const topContributors = employeeWorkloads.slice(0, 5);
+        const unassignedEmployees = employeeWorkloads.filter((e) => e.assignedCount === 0).slice(0, 6);
+
+        // KPI Rates
+        const completionRate = totalProjects > 0 ? Math.round((completedCount / totalProjects) * 100) : 0;
+        const utilizationRate = totalEmployees > 0 ? Math.round((assignedCount / totalEmployees) * 100) : 0;
+        const avgHours = totalProjects > 0 ? Math.round(totalAllottedHours / totalProjects) : 0;
+
+        // Department Headcount
+        const departmentChartData = (eData.departments || []).map((d) => ({
+            name: d._id || "Unassigned",
+            count: d.count
+        }));
+
+        // Status Chart Data
+        const statusChartData = Object.keys(statusCounts).map((key) => ({
+            name: key,
+            value: statusCounts[key],
+            percentage: totalProjects > 0 ? Math.round((statusCounts[key] / totalProjects) * 100) : 0
+        }));
+
+        // Languages & Databases
+        const languageChartData = (pData.languages || []).map((l) => ({
+            name: l._id,
+            count: l.count
+        }));
+
+        const databaseChartData = (pData.databases || []).map((db) => ({
+            name: db._id,
+            count: db.count
+        }));
+
+        // Top Hours Projects
+        const topHoursProjects = (pData.topHoursProjects || []).map((p) => ({
+            name: p.name && p.name.length > 18 ? p.name.slice(0, 16) + "…" : (p.name || "Untitled"),
+            fullName: p.name,
+            hours: Number(p.allottedHours) || 0,
+            status: p.status || "Pending",
+            client: p.clientName || "Direct"
+        }));
+
+        res.json({
+            kpis: {
+                totalProj: totalProjects,
+                totalEmp: totalEmployees,
+                completedCount,
+                inProgressCount,
+                pendingCount,
+                delayedCount,
+                totalAllottedHours,
+                overdueCount,
+                assignedEmpCount: assignedCount,
+                unassignedEmpCount: Math.max(0, totalEmployees - assignedCount),
+                completionRate,
+                utilizationRate,
+                avgHours
+            },
+            statusChartData,
+            departmentChartData,
+            languageChartData,
+            databaseChartData,
+            topHoursProjects,
+            topContributors,
+            unassignedEmployees,
+            uniqueStatuses: Object.keys(statusCounts).sort(),
+            uniqueDepartments: departmentChartData.map((d) => d.name).sort()
+        });
+    } catch (error) {
+        console.error("Analytics Aggregation Error:", error);
+        res.status(500).json({
+            message: "Failed to generate analytics aggregation",
+            error: error.message
+        });
+    }
+});
+
 // Upload & General Error handling middleware
 app.use((err, req, res, next) => {
     if (err instanceof multer.MulterError) {

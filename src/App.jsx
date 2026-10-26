@@ -79,10 +79,12 @@ import {
   Camera,
   Check,
   Clock,
+  BarChart3,
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { ProjectsView, invalidateProjectsCache } from "@/components/ProjectsView";
 import { RecentUpdatesView, invalidateRecentUpdatesCache } from "@/components/RecentUpdatesView";
+import { AnalyticsView } from "@/components/AnalyticsView";
 import { NotificationModal } from "@/components/ui/NotificationModal";
 
 const PRESET_AVATARS = [
@@ -119,7 +121,9 @@ function App() {
       ? "employees"
       : location.pathname === "/recent-updates"
         ? "recent-updates"
-        : "home";
+        : location.pathname === "/analytics"
+          ? "analytics"
+          : "home";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
@@ -874,6 +878,26 @@ function App() {
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={activeTab === "analytics"}
+                      onClick={() => navigate("/analytics")}
+                    >
+                      <BarChart3 className="h-4 w-4" />
+                      <span className="flex">Analytics</span>
+                      <Badge
+                        variant="secondary"
+                        className={`text-[10px] py-0 h-4 font-mono transition-colors ${
+                          activeTab === "analytics"
+                            ? "bg-zinc-950 text-white dark:bg-black dark:text-white border-transparent font-semibold shadow-xs"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        Insights
+                      </Badge>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroup>
             </SidebarContent>
@@ -911,7 +935,9 @@ function App() {
                         ? "Project Portfolio"
                         : activeTab === "recent-updates"
                           ? "Recent Timely Updates"
-                          : "Employee Management"}
+                          : activeTab === "analytics"
+                            ? "Analytics & Executive Insights"
+                            : "Employee Management"}
                   </span>
                 </div>
               </div>
@@ -1049,7 +1075,7 @@ function App() {
                           <CardTitle className="text-base">Quick Actions</CardTitle>
                           <CardDescription>Shortcut to employee and project tools</CardDescription>
                         </CardHeader>
-                        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                           <Button
                             variant="outline"
                             className="justify-between"
@@ -1059,7 +1085,7 @@ function App() {
                             }}
                           >
                             <span className="flex items-center gap-2">
-                              <Plus className="h-4 w-4" /> Add New Employee
+                              <Plus className="h-4 w-4 text-primary" /> Add Employee
                             </span>
                             <ChevronRight className="h-4 w-4 text-muted-foreground" />
                           </Button>
@@ -1070,7 +1096,7 @@ function App() {
                             onClick={() => navigate("/projects")}
                           >
                             <span className="flex items-center gap-2">
-                              <Briefcase className="h-4 w-4" /> View Projects ({totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0)})
+                              <Briefcase className="h-4 w-4 text-indigo-500" /> Projects ({totalProjectsCount > 0 ? totalProjectsCount : (counts.totalProjects || 0)})
                             </span>
                             <ChevronRight className="h-4 w-4 text-muted-foreground" />
                           </Button>
@@ -1081,7 +1107,18 @@ function App() {
                             onClick={() => navigate("/employees")}
                           >
                             <span className="flex items-center gap-2">
-                              <Users className="h-4 w-4" /> View Employees ({totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0)})
+                              <Users className="h-4 w-4 text-emerald-500" /> Employees ({totalEmployeesCount > 0 ? totalEmployeesCount : (counts.totalEmployees || 0)})
+                            </span>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+
+                          <Button
+                            variant="outline"
+                            className="justify-between"
+                            onClick={() => navigate("/analytics")}
+                          >
+                            <span className="flex items-center gap-2">
+                              <BarChart3 className="h-4 w-4 text-violet-500" /> Analytics & Reports
                             </span>
                             <ChevronRight className="h-4 w-4 text-muted-foreground" />
                           </Button>
@@ -1116,6 +1153,17 @@ function App() {
                     <RecentUpdatesView
                       projects={projects}
                       employees={employees}
+                      navigate={navigate}
+                    />
+                  }
+                />
+
+                {/* ANALYTICS & INSIGHTS VIEW */}
+                <Route
+                  path="/analytics"
+                  element={
+                    <AnalyticsView
+                      currentUser={currentUser}
                       navigate={navigate}
                     />
                   }
